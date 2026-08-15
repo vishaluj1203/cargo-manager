@@ -33,7 +33,7 @@ The inbound flow now sends the email to the configured lightweight AI parser fir
 
 ## Product and engineering record
 
-Read [docs/architecture.md](docs/architecture.md) for boundaries, flows, security, and a staged roadmap. Open `/onboarding` in the app for the demo-ready client setup. The full customer process is in [docs/onboarding.md](docs/onboarding.md). Every material decision belongs in [docs/decisions](docs/decisions), and shipped changes should be recorded in [CHANGELOG.md](CHANGELOG.md).
+Read [docs/architecture-plan.md](docs/architecture-plan.md) for the authoritative phased product and system architecture. Open `/onboarding` in the app for the demo-ready client setup, and see [docs/onboarding.md](docs/onboarding.md) for the customer runbook. Shipped changes should be recorded in [CHANGELOG.md](CHANGELOG.md).
 
 ## Deployment
 
