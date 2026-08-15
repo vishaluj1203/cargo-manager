@@ -29,6 +29,7 @@ const expectedTables = [
   "emails",
   "inbound_events",
   "inbox_connections",
+  "inbox_credentials",
   "mailbox_cursors",
   "organization_members",
   "organizations",
@@ -55,7 +56,14 @@ try {
     select proname from pg_proc
     join pg_namespace on pg_namespace.oid = pg_proc.pronamespace
     where pg_namespace.nspname = 'public'
-      and proname = any(${["create_workspace", "change_ticket_status", "queue_ticket_reply"]})
+      and proname = any(${[
+        "create_workspace",
+        "create_workspace_v2",
+        "change_ticket_status",
+        "queue_ticket_reply",
+        "connect_gmail_inbox",
+        "disconnect_gmail_inbox",
+      ]})
     order by proname
   `;
   const policies = await sql<{ count: number }[]>`
@@ -76,7 +84,10 @@ try {
     .map((table) => table.relname);
   const expectedFunctions = [
     "change_ticket_status",
+    "connect_gmail_inbox",
     "create_workspace",
+    "create_workspace_v2",
+    "disconnect_gmail_inbox",
     "queue_ticket_reply",
   ];
   const missingFunctions = expectedFunctions.filter(

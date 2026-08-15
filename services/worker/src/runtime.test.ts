@@ -53,6 +53,9 @@ describe("cargo worker runtime", () => {
       organizationId: "org-1",
       inboxConnectionId: "inbox-1",
       provider: "local_mailpit",
+      address: "cargo@skyvalence.local",
+      encryptedRefreshToken: null,
+      grantedScopes: [],
       providerMessageId: "mailpit-1",
       attempts: 1,
     };
@@ -64,6 +67,8 @@ describe("cargo worker runtime", () => {
           organizationId: "org-1",
           provider: "local_mailpit",
           address: "cargo@skyvalence.local",
+          encryptedRefreshToken: null,
+          grantedScopes: [],
         },
       ]),
       enqueueInbound: vi.fn().mockResolvedValue(true),
@@ -130,6 +135,7 @@ describe("cargo worker runtime", () => {
     });
     expect(rawStore.put).toHaveBeenCalledWith(
       "org-1",
+      "local_mailpit",
       "mailpit-1",
       Buffer.from("raw"),
     );
@@ -151,6 +157,9 @@ describe("cargo worker runtime", () => {
       organizationId: "org-1",
       inboxConnectionId: "inbox-1",
       provider: "local_mailpit",
+      address: "cargo@skyvalence.local",
+      encryptedRefreshToken: null,
+      grantedScopes: [],
       providerMessageId: "mailpit-1",
       attempts: 1,
     };

@@ -17,7 +17,7 @@ function slugify(name: string): string {
 }
 
 export async function createWorkspace(formData: FormData) {
-  await requireAuthenticatedUser();
+  const user = await requireAuthenticatedUser();
   const parsed = createWorkspaceSchema.safeParse({
     name: formData.get("name"),
     companyType: formData.get("companyType"),
@@ -31,16 +31,26 @@ export async function createWorkspace(formData: FormData) {
   }
 
   const supabase = await createClient();
+  const configuredProvider = process.env.ONBOARDING_INBOX_PROVIDER;
+  const inboxProvider =
+    configuredProvider === "gmail" || configuredProvider === "local_mailpit"
+      ? configuredProvider
+      : process.env.NODE_ENV === "production"
+        ? "gmail"
+        : "local_mailpit";
   const inboxAddress =
-    process.env.LOCAL_INBOX_ADDRESS ?? "cargo@skyvalence.local";
-  const { error } = await supabase.rpc("create_workspace", {
+    inboxProvider === "gmail"
+      ? user.email
+      : (process.env.LOCAL_INBOX_ADDRESS ?? "cargo@skyvalence.local");
+  const { error } = await supabase.rpc("create_workspace_v2", {
     workspace_name: parsed.data.name,
     workspace_slug: slugify(parsed.data.name),
     workspace_company_type: parsed.data.companyType,
     workspace_timezone: parsed.data.timezone,
     workspace_modes: parsed.data.modes,
+    workspace_inbox_provider: inboxProvider,
     workspace_inbox_address: inboxAddress,
   });
   if (error) redirect(`/onboarding?error=${encodeURIComponent(error.message)}`);
-  redirect("/tickets");
+  redirect(inboxProvider === "gmail" ? "/settings/inboxes" : "/tickets");
 }

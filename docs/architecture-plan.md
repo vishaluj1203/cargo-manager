@@ -31,15 +31,15 @@ Use one TypeScript monorepo with independently deployable web and worker process
 
 | Concern            | Choice                                                           | Why                                                                              |
 | ------------------ | ---------------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| Web product        | Next.js App Router on Vercel                                     | Fast UI iteration, server rendering and low-cost startup deployment              |
+| Web product        | Next.js App Router on GCP Cloud Run                              | One commercial-safe, scale-to-zero deployment account for the startup            |
 | Authentication     | Hosted Supabase Auth                                             | Account lifecycle and secure SSR sessions without operating an identity platform |
 | Transactional data | Hosted Supabase PostgreSQL                                       | Managed Postgres, row-level security and a usable free startup tier              |
 | Raw email storage  | Private Supabase Storage bucket                                  | Keeps original MIME available for audit and reprocessing                         |
 | Background work    | Local worker for acceptance; GCP Cloud Run worker for production | Email and AI work must not run inside short-lived web requests                   |
 | Local email        | Mailpit                                                          | Real SMTP/MIME/thread testing without sending external mail                      |
-| Production inbox   | Google Workspace Gmail API                                       | OAuth, push notifications/history sync and replies from the connected mailbox    |
+| Production inbox   | Google Workspace Gmail API                                       | Per-user OAuth, scheduled polling, raw MIME ingestion and threaded mailbox reply |
 | AI extraction      | Gemini API hosted `gemma-4-26b-a4b-it`                           | Open-weight MoE model, forced function output and no local model runtime         |
-| Observability      | Sentry and PostHog in deployment wave                            | Errors, worker failures and product feedback without blocking the demo           |
+| Observability      | Structured GCP logs first; Sentry and PostHog next               | Useful deployment logs now, richer error and product analytics after the demo    |
 
 Do not split frontend and backend into separate repositories now. Shared contracts, migrations and one atomic history are more valuable at this stage. The deployment boundary already exists at `apps/web` and `services/worker`.
 
@@ -52,6 +52,7 @@ packages/contracts     Shared Zod request, email and AI schemas
 packages/db            Drizzle schema and PostgreSQL connection
 packages/email         Mailpit provider, MIME parser and SMTP reply adapter
 packages/ai            Provider-neutral cargo extractor and Google Gemma adapter
+packages/security      AES-256-GCM server-side credential encryption
 supabase/migrations    Immutable hosted database evolution
 docs                   Architecture and operator runbooks
 ```
@@ -89,7 +90,9 @@ Worker ─────► private raw-email bucket
        Gmail API / local SMTP
 ```
 
-Vercel serves only the interactive web product. The worker is a long-running or scheduled process and will move to Cloud Run after local acceptance. Supabase remains the shared data plane in both environments.
+Two Cloud Run services provide the deployment boundary: a public, scale-to-zero Next.js service and a private, single-concurrency worker invoked by Cloud Scheduler. Supabase remains the shared data plane in local and hosted environments.
+
+Production application compute is deployed in GCP London (`europe-west2`). The existing Supabase pooler resolves to AWS Ireland (`eu-west-1`), so it is EU-side but not UK-resident. That is acceptable for synthetic demo data; strict UK residency requires a new Supabase project in London (`eu-west-2`) and a controlled migration before onboarding customer data.
 
 ## 5. Tenant and security model
 
@@ -100,6 +103,7 @@ Every business row belongs to an `organization_id`. Membership is stored in `org
 - `create_workspace`, `change_ticket_status` and `queue_ticket_reply` are narrow database commands that recheck identity and membership.
 - Raw MIME is private and stored below `<organization-id>/<provider>/<message>.eml`.
 - Worker credentials are server-only.
+- Gmail refresh tokens are encrypted with AES-256-GCM before storage; authenticated browser clients have no grants or RLS policies on `inbox_credentials`.
 - Customer email and attachments are delimited as untrusted AI input; instructions inside them are never system instructions.
 - Audit and AI-run records cannot be updated or deleted by ordinary authenticated users.
 
@@ -162,7 +166,7 @@ The database is the source of truth; sending is never performed directly by a br
 The current schema includes:
 
 - Identity: `profiles`, `organizations`, `organization_members`
-- Inbox: `inbox_connections`, `mailbox_cursors`
+- Inbox: `inbox_connections`, `inbox_credentials`, `mailbox_cursors`
 - Durable intake: `inbound_events`
 - Conversation: `email_threads`, `emails`
 - Cargo work: `contacts`, `tickets`, `ticket_emails`, `ticket_status_history`
@@ -183,7 +187,7 @@ Status: complete.
 - PostgreSQL tables, RLS, policies, private bucket and command functions
 - Live schema verification script
 
-Exit evidence: 15 application tables, RLS on all 15, 20 policies, private raw bucket and migrations 0000–0004.
+Exit evidence: 16 application tables, RLS on all 16, 20 policies, private raw bucket and migrations 0000–0005.
 
 ### Wave 1 — local product acceptance
 
@@ -219,26 +223,26 @@ Exit criterion: a repeatable 10-minute demo with no terminal intervention after 
 
 ### Wave 3 — first real inbox
 
-Status: pending customer consent and Google Cloud configuration.
+Status: implementation complete for the polling demo; live OAuth acceptance is blocked on owner configuration.
 
-- Google OAuth verification strategy
-- Domain-wide or per-user Gmail authorization decision
-- Gmail watch/Pub/Sub endpoint
-- Gmail history cursor and catch-up reconciliation
+- Per-user Google OAuth with offline access and CSRF-bound callback state
+- Gmail readonly/send scopes and Workspace test-user strategy
+- Scheduled recent-INBOX reconciliation with provider-message idempotency
 - Raw Gmail MIME adapter
-- Gmail send with thread ID plus RFC headers
-- Token encryption and disconnect/reconnect UX
+- Gmail send with provider thread ID plus RFC headers
+- AES-256-GCM token encryption and disconnect/reconnect UX
+- Future after demo: Gmail watch/Pub/Sub, history cursors and catch-up reconciliation
 
 Exit criterion: a Skyvalence Workspace test inbox runs for 72 hours without duplicate or lost messages.
 
 ### Wave 4 — production deployment
 
-Status: no deployment before local acceptance.
+Status: container and provisioning assets complete; deployment blocked on GCP billing and Google OAuth credentials.
 
-- Vercel project for `apps/web`
-- Cloud Run worker built from `services/worker`
+- Cloud Run web container built from `apps/web`
+- Private Cloud Run worker built from `services/worker`
 - Cloud Scheduler or Pub/Sub wake-up path
-- Vercel and GCP server-only secrets
+- GCP Secret Manager server-only secrets
 - `app.skyvalence.com` DNS and TLS
 - Supabase production redirect URLs
 - Health checks, alarms, backups and rollback runbook
@@ -262,13 +266,13 @@ Status: future discovery.
 
 For the startup phase:
 
-- Vercel free tier: web UI and server actions.
+- Cloud Run request-based services with zero minimum instances: web UI and scheduled worker.
 - Supabase free tier: Auth, PostgreSQL and small raw-email storage.
 - Gemini API free tier with hosted Gemma for synthetic demos only; move to an approved paid/no-training tier before customer data.
 - Cloud Run free allowance: worker only after local acceptance; scale to zero.
 - Mailpit: local and CI integration testing only.
 
-GCP is not the best place for everything at this stage. It is the right home for the background worker and Gmail Pub/Sub integration. Vercel remains the fastest web host, and Supabase avoids operating PostgreSQL/Auth ourselves.
+Vercel Hobby is not the production target because its current terms restrict Hobby to personal, non-commercial use. Vercel Pro remains a later option, but GCP Cloud Run is the lower-cost commercial-safe choice for this startup demo. Supabase avoids operating PostgreSQL/Auth ourselves.
 
 Cost controls:
 
@@ -281,14 +285,15 @@ Cost controls:
 
 ## 12. Current blockers and required owner inputs
 
-The repository can compile and mocked flows can pass without secrets. A real acceptance run additionally requires:
+Local Mailpit plus live-AI acceptance is passing. Hosted Gmail acceptance now requires owner-controlled external configuration:
 
-1. `SUPABASE_SERVICE_ROLE_KEY`: Supabase secret/service-role key for private raw MIME upload.
-2. `AI_API_KEY`: Google AI Studio API key for the hosted Gemma call.
+1. Enable billing on GCP project `sky-valance-cargo-manager` (billing is currently disabled; Cloud Run still uses free allowances first).
+2. Configure Google Auth Platform and create a Web OAuth client with Gmail readonly/send scopes and the documented callback URLs.
+3. Put `GOOGLE_OAUTH_CLIENT_ID` and `GOOGLE_OAUTH_CLIENT_SECRET` in ignored `.env.local`—never in chat or Git.
+4. Generate `INBOX_TOKEN_ENCRYPTION_KEY` with `openssl rand -base64 32` and retain it in a password manager and Secret Manager.
+5. Add the final Cloud Run URL to Supabase Auth URL configuration and Google OAuth redirect URIs.
 
-Keep both only in `.env.local` and later in the deployment secret stores. Never paste them into tickets, source files, screenshots or Git history.
-
-Gmail integration will later require Google OAuth consent configuration and a selected Workspace test mailbox. It is intentionally not required for the local Mailpit acceptance gate.
+The previously shared Gemini API key must be rotated before customer or production use because it appeared in chat history.
 
 ## 13. Definition of done for the first demo
 
@@ -316,3 +321,7 @@ Decision log:
 - 2026-08-16: hosted open-weight Gemma 4 through the Gemini API; forced function output, local Zod validation and no local model runtime. This supersedes the initial Together/Qwen choice.
 - 2026-08-16: cargo location codes require structured route roles and deterministic reference validation; the current flat origin/destination contract is retained only until the proposed migration is implemented. Research and live-model evidence are recorded in [cargo email location-code research](research/cargo-email-location-codes.md).
 - 2026-08-16: no cloud application deployment before the local end-to-end gate passes.
+- 2026-08-16: local end-to-end acceptance passed again after the Gmail migration with a real hosted Gemma response and no fallback parser.
+- 2026-08-16: deploy both Next.js and the private worker to GCP Cloud Run; do not use Vercel Hobby for this commercial client demo.
+- 2026-08-16: deploy production compute in GCP London (`europe-west2`) for the initial UK-side rollout.
+- 2026-08-16: use per-user Gmail OAuth with encrypted refresh tokens and scheduled polling for the demo; add push/history synchronization after the first live-inbox acceptance period.

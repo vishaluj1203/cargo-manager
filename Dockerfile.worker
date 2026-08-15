@@ -1,0 +1,13 @@
+FROM node:22-bookworm-slim
+
+ENV NODE_ENV=production
+ENV PORT=8080
+WORKDIR /app
+
+RUN corepack enable && corepack prepare pnpm@11.21.0 --activate
+COPY . .
+RUN pnpm install --frozen-lockfile && pnpm --filter @cargo/worker... build
+
+USER node
+EXPOSE 8080
+CMD ["pnpm", "--filter", "@cargo/worker", "start"]

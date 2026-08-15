@@ -23,7 +23,8 @@
     "db:generate": "pnpm --filter @cargo/db generate",
     "supabase:link": "supabase link",
     "db:push": "node scripts/supabase-cloud.mjs push",
-    "db:push:dry-run": "node scripts/supabase-cloud.mjs dry-run"
+    "db:push:dry-run": "node scripts/supabase-cloud.mjs dry-run",
+    "deploy:gcp": "node deploy/gcp/deploy.mjs"
   },
   "devDependencies": {
     "prettier": "^3.6.2",

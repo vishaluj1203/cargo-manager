@@ -25,6 +25,7 @@ export interface SendReplyInput {
   messageId?: string;
   inReplyTo: string;
   references: string[];
+  providerThreadId?: string | null;
 }
 
 export interface SentEmail {
@@ -110,6 +111,8 @@ function references(parsed: ParsedMail): string[] {
 export async function parseInboundMime(
   raw: Buffer,
   providerMessageId: string,
+  provider: NormalizedEmail["provider"] = "local_mailpit",
+  providerThreadId: string | null = null,
 ): Promise<ParsedInboundEmail> {
   const parsed = await simpleParser(raw, {
     skipHtmlToText: false,
@@ -121,9 +124,9 @@ export async function parseInboundMime(
   const subject = parsed.subject?.trim() || "(no subject)";
 
   const email = normalizedEmailSchema.parse({
-    provider: "local_mailpit",
+    provider,
     providerMessageId,
-    providerThreadId: null,
+    providerThreadId,
     messageId: rfcMessageId,
     inReplyTo: parsed.inReplyTo
       ? normalizeMessageId(parsed.inReplyTo, "unknown")
@@ -242,6 +245,190 @@ export class MailpitEmailProvider implements EmailProvider {
     return {
       providerMessageId: messageId,
       messageId,
+      sentAt: new Date(),
+    };
+  }
+}
+
+const googleTokenSchema = z.object({
+  access_token: z.string().min(1),
+  expires_in: z.number().positive(),
+  token_type: z.string().optional(),
+});
+
+const gmailMessageListSchema = z.object({
+  messages: z
+    .array(z.object({ id: z.string(), threadId: z.string() }))
+    .optional(),
+});
+
+const gmailRawMessageSchema = z.object({
+  id: z.string(),
+  threadId: z.string(),
+  internalDate: z.string().optional(),
+  raw: z.string(),
+});
+
+const gmailSentMessageSchema = z.object({
+  id: z.string(),
+  threadId: z.string(),
+});
+
+export interface GmailProviderOptions {
+  address: string;
+  refreshToken: string;
+  clientId: string;
+  clientSecret: string;
+  query?: string;
+  fetcher?: typeof fetch;
+}
+
+function gmailApiError(operation: string, response: Response, detail: string) {
+  return new Error(
+    `Gmail API ${operation} failed (${response.status}): ${detail.slice(0, 500)}`,
+  );
+}
+
+export class GmailEmailProvider implements EmailProvider {
+  readonly #address: string;
+  readonly #refreshToken: string;
+  readonly #clientId: string;
+  readonly #clientSecret: string;
+  readonly #query: string;
+  readonly #fetcher: typeof fetch;
+  #accessToken: { value: string; expiresAt: number } | null = null;
+
+  constructor(options: GmailProviderOptions) {
+    for (const [name, value] of Object.entries({
+      address: options.address,
+      refreshToken: options.refreshToken,
+      clientId: options.clientId,
+      clientSecret: options.clientSecret,
+    })) {
+      if (!value.trim()) throw new Error(`Gmail ${name} is required`);
+    }
+    this.#address = options.address.toLowerCase();
+    this.#refreshToken = options.refreshToken;
+    this.#clientId = options.clientId;
+    this.#clientSecret = options.clientSecret;
+    this.#query = options.query ?? "newer_than:7d";
+    this.#fetcher = options.fetcher ?? fetch;
+  }
+
+  async #token(): Promise<string> {
+    if (this.#accessToken && this.#accessToken.expiresAt > Date.now()) {
+      return this.#accessToken.value;
+    }
+    const response = await this.#fetcher(
+      "https://oauth2.googleapis.com/token",
+      {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          client_id: this.#clientId,
+          client_secret: this.#clientSecret,
+          refresh_token: this.#refreshToken,
+          grant_type: "refresh_token",
+        }),
+      },
+    );
+    if (!response.ok) {
+      throw gmailApiError("token refresh", response, await response.text());
+    }
+    const token = googleTokenSchema.parse(await response.json());
+    this.#accessToken = {
+      value: token.access_token,
+      expiresAt: Date.now() + Math.max(token.expires_in - 60, 1) * 1_000,
+    };
+    return token.access_token;
+  }
+
+  async #request(path: string, init?: RequestInit): Promise<Response> {
+    const accessToken = await this.#token();
+    return this.#fetcher(`https://gmail.googleapis.com/gmail/v1${path}`, {
+      ...init,
+      headers: {
+        authorization: `Bearer ${accessToken}`,
+        ...init?.headers,
+      },
+    });
+  }
+
+  async listMessages(limit = 100): Promise<MailboxMessageSummary[]> {
+    const query = new URLSearchParams({
+      maxResults: String(Math.min(Math.max(limit, 1), 500)),
+      labelIds: "INBOX",
+      q: this.#query,
+    });
+    const response = await this.#request(
+      `/users/me/messages?${query.toString()}`,
+    );
+    if (!response.ok) {
+      throw gmailApiError("message list", response, await response.text());
+    }
+    const payload = gmailMessageListSchema.parse(await response.json());
+    return (payload.messages ?? []).map((message) => ({
+      providerMessageId: message.id,
+      rfcMessageId: null,
+      createdAt: new Date(),
+      recipients: [this.#address],
+    }));
+  }
+
+  async fetchAndParse(providerMessageId: string): Promise<ParsedInboundEmail> {
+    const response = await this.#request(
+      `/users/me/messages/${encodeURIComponent(providerMessageId)}?format=raw`,
+    );
+    if (!response.ok) {
+      throw gmailApiError("message fetch", response, await response.text());
+    }
+    const payload = gmailRawMessageSchema.parse(await response.json());
+    return parseInboundMime(
+      Buffer.from(payload.raw, "base64url"),
+      payload.id,
+      "gmail",
+      payload.threadId,
+    );
+  }
+
+  async sendReply(input: SendReplyInput): Promise<SentEmail> {
+    const transport = nodemailer.createTransport({
+      streamTransport: true,
+      buffer: true,
+      newline: "unix",
+    });
+    const rendered = await transport.sendMail({
+      from: input.from || this.#address,
+      to: input.to,
+      cc: input.cc,
+      subject: replySubject(input.subject),
+      text: input.bodyText,
+      messageId: input.messageId,
+      inReplyTo: normalizeMessageId(input.inReplyTo, "unknown"),
+      references: replyReferences(input.references, input.inReplyTo),
+    });
+    const message = rendered.message;
+    const raw = Buffer.isBuffer(message)
+      ? message
+      : Buffer.from(String(message), "utf8");
+    const response = await this.#request("/users/me/messages/send", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        raw: raw.toString("base64url"),
+        ...(input.providerThreadId ? { threadId: input.providerThreadId } : {}),
+      }),
+    });
+    if (!response.ok) {
+      throw gmailApiError("message send", response, await response.text());
+    }
+    const sent = gmailSentMessageSchema.parse(await response.json());
+    return {
+      providerMessageId: sent.id,
+      messageId: normalizeMessageId(
+        input.messageId,
+        `gmail-${sent.id}@mail.gmail.com`,
+      ),
       sentAt: new Date(),
     };
   }

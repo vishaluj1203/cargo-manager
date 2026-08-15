@@ -10,6 +10,8 @@ export interface ConnectedInbox {
   organizationId: string;
   provider: "local_mailpit" | "gmail" | "microsoft";
   address: string;
+  encryptedRefreshToken: string | null;
+  grantedScopes: string[];
 }
 
 export interface ClaimedInboundEvent {
@@ -17,6 +19,9 @@ export interface ClaimedInboundEvent {
   organizationId: string;
   inboxConnectionId: string;
   provider: ConnectedInbox["provider"];
+  address: string;
+  encryptedRefreshToken: string | null;
+  grantedScopes: string[];
   providerMessageId: string;
   attempts: number;
 }
@@ -40,7 +45,11 @@ export interface ClaimedOutboxDelivery {
   ticketId: string;
   emailId: string;
   attempts: number;
+  inboxConnectionId: string;
   provider: ConnectedInbox["provider"];
+  address: string;
+  encryptedRefreshToken: string | null;
+  grantedScopes: string[];
   message: SendReplyInput;
 }
 
@@ -66,6 +75,7 @@ export interface WorkerRepository {
 export interface RawEmailStore {
   put(
     organizationId: string,
+    provider: ConnectedInbox["provider"],
     providerMessageId: string,
     raw: Buffer,
   ): Promise<string>;

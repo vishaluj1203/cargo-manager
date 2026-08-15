@@ -2,6 +2,7 @@ import nodemailer from "nodemailer";
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  GmailEmailProvider,
   MailpitEmailProvider,
   parseInboundMime,
   replyReferences,
@@ -76,5 +77,100 @@ describe("email adapter", () => {
     expect(
       replyReferences(["<root@example.com>"], "parent@example.com"),
     ).toEqual(["<root@example.com>", "<parent@example.com>"]);
+  });
+
+  it("lists and parses Gmail raw MIME using OAuth refresh credentials", async () => {
+    const fetcher = vi.fn<typeof fetch>(async (input) => {
+      const url = String(input);
+      if (url === "https://oauth2.googleapis.com/token") {
+        return new Response(
+          JSON.stringify({ access_token: "access", expires_in: 3600 }),
+          { status: 200 },
+        );
+      }
+      if (url.includes("/users/me/messages?")) {
+        return new Response(
+          JSON.stringify({ messages: [{ id: "gmail-1", threadId: "t-1" }] }),
+          { status: 200 },
+        );
+      }
+      if (url.includes("/users/me/messages/gmail-1?format=raw")) {
+        return new Response(
+          JSON.stringify({
+            id: "gmail-1",
+            threadId: "t-1",
+            raw: raw.toString("base64url"),
+          }),
+          { status: 200 },
+        );
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    const provider = new GmailEmailProvider({
+      address: "cargo@skyvalence.com",
+      refreshToken: "refresh",
+      clientId: "client",
+      clientSecret: "secret",
+      fetcher,
+    });
+
+    await expect(provider.listMessages(20)).resolves.toMatchObject([
+      {
+        providerMessageId: "gmail-1",
+        recipients: ["cargo@skyvalence.com"],
+      },
+    ]);
+    await expect(provider.fetchAndParse("gmail-1")).resolves.toMatchObject({
+      email: {
+        provider: "gmail",
+        providerMessageId: "gmail-1",
+        providerThreadId: "t-1",
+      },
+    });
+  });
+
+  it("sends Gmail replies as base64url MIME in the original thread", async () => {
+    let sendBody: { raw?: string; threadId?: string } = {};
+    const fetcher = vi.fn<typeof fetch>(async (input, init) => {
+      const url = String(input);
+      if (url === "https://oauth2.googleapis.com/token") {
+        return new Response(
+          JSON.stringify({ access_token: "access", expires_in: 3600 }),
+          { status: 200 },
+        );
+      }
+      if (url.endsWith("/users/me/messages/send")) {
+        sendBody = JSON.parse(String(init?.body));
+        return new Response(
+          JSON.stringify({ id: "sent-gmail-1", threadId: "thread-1" }),
+          { status: 200 },
+        );
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    const provider = new GmailEmailProvider({
+      address: "cargo@skyvalence.com",
+      refreshToken: "refresh",
+      clientId: "client",
+      clientSecret: "secret",
+      fetcher,
+    });
+
+    await expect(
+      provider.sendReply({
+        from: "cargo@skyvalence.com",
+        to: "maya@example.com",
+        subject: "Status",
+        bodyText: "We are checking.",
+        messageId: "<reply@cargo-manager.skyvalence.com>",
+        inReplyTo: "<customer@example.com>",
+        references: [],
+        providerThreadId: "thread-1",
+      }),
+    ).resolves.toMatchObject({ providerMessageId: "sent-gmail-1" });
+    expect(sendBody.threadId).toBe("thread-1");
+    expect(Buffer.from(sendBody.raw ?? "", "base64url").toString()).toContain(
+      "In-Reply-To: <customer@example.com>",
+    );
   });
 });

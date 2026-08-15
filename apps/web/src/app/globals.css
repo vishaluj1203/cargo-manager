@@ -321,6 +321,98 @@ button {
   background: #28a36e;
   box-shadow: 0 0 0 4px rgba(40, 163, 110, 0.12);
 }
+
+.live-dot-off {
+  background: #a9b2ae;
+  box-shadow: none;
+}
+
+.settings-content {
+  max-width: 66rem;
+}
+.settings-panel {
+  padding: 1.35rem;
+  margin-top: 1rem;
+}
+.settings-panel h2 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+.settings-panel p {
+  color: var(--muted);
+  margin: 0.3rem 0 0;
+}
+.settings-intro {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 1rem;
+}
+.settings-icon {
+  width: 2.7rem;
+  height: 2.7rem;
+  border-radius: 0.75rem;
+  display: grid;
+  place-items: center;
+  color: var(--brand);
+  background: var(--brand-soft);
+}
+.security-note {
+  display: flex;
+  gap: 0.55rem;
+  align-items: center;
+  color: var(--muted);
+  border-top: 1px solid var(--line);
+  margin-top: 1rem;
+  padding-top: 1rem;
+  font-size: 0.84rem;
+}
+.inbox-list {
+  display: grid;
+  gap: 0.65rem;
+  margin-top: 1rem;
+}
+.inbox-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: 0.75rem;
+}
+.inbox-row strong,
+.inbox-row span {
+  display: block;
+}
+.inbox-row > div > span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  margin-top: 0.15rem;
+  text-transform: capitalize;
+}
+.connection-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.55rem;
+  border-radius: 999px;
+  color: var(--muted);
+  background: #eef1ef;
+  font-size: 0.78rem;
+  text-transform: capitalize;
+}
+.connection-connected {
+  color: var(--brand-dark);
+  background: var(--brand-soft);
+}
+
+@media (max-width: 760px) {
+  .settings-intro,
+  .inbox-row {
+    grid-template-columns: 1fr;
+  }
+}
 .content {
   width: min(100%, 90rem);
   margin: 0 auto;

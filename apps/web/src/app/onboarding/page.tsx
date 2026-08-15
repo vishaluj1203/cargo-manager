@@ -24,7 +24,7 @@ export default async function OnboardingPage({
           <span>Cargo Manager</span>
         </div>
         <p className="eyebrow" style={{ marginTop: "2rem" }}>
-          Workspace setup · 1 of 2
+          Workspace setup · Step 1 of 2
         </p>
         <h1>Tell us about your cargo desk.</h1>
         <p>
@@ -124,7 +124,7 @@ export default async function OnboardingPage({
             }}
           >
             <button className="button button-primary" type="submit">
-              Create cargo desk <ArrowRight size={16} />
+              Continue to inbox <ArrowRight size={16} />
             </button>
           </div>
         </form>

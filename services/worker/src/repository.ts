@@ -36,11 +36,15 @@ export class PostgresWorkerRepository implements WorkerRepository {
       select id,
              organization_id as "organizationId",
              provider,
-             lower(address) as address
-      from public.inbox_connections
-      where status = 'connected'
-        and provider in ('local_mailpit', 'gmail')
-      order by created_at
+             lower(address) as address,
+             credentials.encrypted_refresh_token as "encryptedRefreshToken",
+             coalesce(credentials.granted_scopes, array[]::text[]) as "grantedScopes"
+      from public.inbox_connections inbox
+      left join public.inbox_credentials credentials
+        on credentials.inbox_connection_id = inbox.id
+      where inbox.status = 'connected'
+        and inbox.provider in ('local_mailpit', 'gmail')
+      order by inbox.created_at
     `;
   }
 
@@ -83,13 +87,19 @@ export class PostgresWorkerRepository implements WorkerRepository {
           locked_at = now(),
           locked_by = ${workerId},
           last_error = null
-      from candidate, public.inbox_connections inbox
+      from candidate,
+           public.inbox_connections inbox
+           left join public.inbox_credentials credentials
+             on credentials.inbox_connection_id = inbox.id
       where event.id = candidate.id
         and inbox.id = event.inbox_connection_id
       returning event.id,
                 event.organization_id as "organizationId",
                 event.inbox_connection_id as "inboxConnectionId",
                 inbox.provider,
+                lower(inbox.address) as address,
+                credentials.encrypted_refresh_token as "encryptedRefreshToken",
+                coalesce(credentials.granted_scopes, array[]::text[]) as "grantedScopes",
                 event.provider_event_id as "providerMessageId",
                 event.attempts
     `;
@@ -127,7 +137,17 @@ export class PostgresWorkerRepository implements WorkerRepository {
         (value): value is string => Boolean(value),
       );
       let threadId: string | null = null;
-      if (parentIds.length) {
+      if (email.providerThreadId) {
+        const providerThread = await transaction<IdRow[]>`
+          select id
+          from public.email_threads
+          where organization_id = ${event.organizationId}
+            and provider_thread_id = ${email.providerThreadId}
+          limit 1
+        `;
+        threadId = providerThread[0]?.id ?? null;
+      }
+      if (!threadId && parentIds.length) {
         const parent = await transaction<IdRow[]>`
           select thread_id as id
           from public.emails
@@ -331,7 +351,12 @@ export class PostgresWorkerRepository implements WorkerRepository {
         ticketId: string;
         emailId: string;
         attempts: number;
+        inboxConnectionId: string;
         provider: ClaimedOutboxDelivery["provider"];
+        address: string;
+        encryptedRefreshToken: string | null;
+        grantedScopes: string[];
+        providerThreadId: string | null;
         fromAddress: string;
         toRecipients: Array<{ address: string }>;
         ccRecipients: Array<{ address: string }>;
@@ -344,12 +369,21 @@ export class PostgresWorkerRepository implements WorkerRepository {
     >`
       select job.id as "jobId", job.organization_id as "organizationId",
              job.ticket_id as "ticketId", job.email_id as "emailId", job.attempts,
-             email.provider, email.from_address as "fromAddress",
+             inbox.id as "inboxConnectionId", inbox.provider,
+             lower(inbox.address) as address,
+             credentials.encrypted_refresh_token as "encryptedRefreshToken",
+             coalesce(credentials.granted_scopes, array[]::text[]) as "grantedScopes",
+             thread.provider_thread_id as "providerThreadId",
+             inbox.address as "fromAddress",
              email.to_recipients as "toRecipients", email.cc_recipients as "ccRecipients",
              email.subject, email.body_text as "bodyText", email.rfc_message_id as "messageId",
              email.in_reply_to as "inReplyTo", email."references"
       from public.outbox_jobs job
       join public.emails email on email.id = job.email_id
+      join public.email_threads thread on thread.id = email.thread_id
+      join public.inbox_connections inbox on inbox.id = job.inbox_connection_id
+      left join public.inbox_credentials credentials
+        on credentials.inbox_connection_id = inbox.id
       where job.id = ${claimed[0].id}
       limit 1
     `;
@@ -366,7 +400,11 @@ export class PostgresWorkerRepository implements WorkerRepository {
       ticketId: row.ticketId,
       emailId: row.emailId,
       attempts: row.attempts,
+      inboxConnectionId: row.inboxConnectionId,
       provider: row.provider,
+      address: row.address,
+      encryptedRefreshToken: row.encryptedRefreshToken,
+      grantedScopes: row.grantedScopes,
       message: {
         from: row.fromAddress,
         to: recipient,
@@ -376,6 +414,7 @@ export class PostgresWorkerRepository implements WorkerRepository {
         messageId: row.messageId,
         inReplyTo: row.inReplyTo,
         references: row.references,
+        providerThreadId: row.providerThreadId,
       },
     };
   }

@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "next build && node scripts/fix-standalone.mjs",
     "start": "next start",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests",
@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@cargo/contracts": "workspace:*",
+    "@cargo/security": "workspace:*",
     "@supabase/ssr": "^0.7.0",
     "@supabase/supabase-js": "^2.57.4",
     "lucide-react": "^0.544.0",

@@ -10,6 +10,7 @@ import {
 import Link from "next/link";
 
 import { requireAuthenticatedUser, requireCurrentWorkspace } from "@/lib/auth";
+import { createClient } from "@/lib/supabase/server";
 
 import { signOut } from "./actions";
 
@@ -18,14 +19,22 @@ export default async function ApplicationLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const [user, membership] = await Promise.all([
+  const [user, membership, supabase] = await Promise.all([
     requireAuthenticatedUser(),
     requireCurrentWorkspace(),
+    createClient(),
   ]);
   const organization = membership.organizations as unknown as {
     name: string;
     company_type: string;
   };
+  const { data: connectedInbox } = await supabase
+    .from("inbox_connections")
+    .select("address, provider")
+    .eq("organization_id", membership.organization_id)
+    .eq("status", "connected")
+    .limit(1)
+    .maybeSingle();
 
   return (
     <div className="app-shell">
@@ -53,7 +62,7 @@ export default async function ApplicationLayout({
             <BarChart3 size={17} />
             <span>Operations</span>
           </Link>
-          <Link href="/tickets">
+          <Link href="/settings/inboxes">
             <Settings2 size={17} />
             <span>Settings</span>
           </Link>
@@ -81,7 +90,12 @@ export default async function ApplicationLayout({
         <header className="topbar">
           <span className="topbar-title">Operations desk</span>
           <span className="live-indicator">
-            <span className="live-dot" /> Mail worker ready
+            <span
+              className={connectedInbox ? "live-dot" : "live-dot live-dot-off"}
+            />
+            {connectedInbox
+              ? `${connectedInbox.address} connected`
+              : "Inbox connection required"}
           </span>
         </header>
         {children}

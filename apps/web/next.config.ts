@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import { resolve } from "node:path";
 
 try {
   process.loadEnvFile("../../.env.local");
@@ -7,7 +8,9 @@ try {
 }
 
 const nextConfig: NextConfig = {
-  transpilePackages: ["@cargo/contracts"],
+  output: "standalone",
+  outputFileTracingRoot: resolve(import.meta.dirname, "../.."),
+  transpilePackages: ["@cargo/contracts", "@cargo/security"],
   poweredByHeader: false,
 };
 

@@ -18,7 +18,10 @@ export interface WorkerRunSummary {
 }
 
 export type EmailProviderFactory = (
-  provider: ConnectedInbox["provider"],
+  connection: Pick<
+    ConnectedInbox,
+    "provider" | "address" | "encryptedRefreshToken" | "grantedScopes"
+  >,
 ) => EmailProvider;
 
 export class CargoWorkerRuntime {
@@ -33,7 +36,7 @@ export class CargoWorkerRuntime {
   async discoverInbound(): Promise<number> {
     let discovered = 0;
     for (const inbox of await this.repository.listConnectedInboxes()) {
-      const provider = this.emailProvider(inbox.provider);
+      const provider = this.emailProvider(inbox);
       const messages = await provider.listMessages(250);
       for (const message of messages) {
         if (!message.recipients.includes(inbox.address.toLowerCase())) continue;
@@ -56,11 +59,12 @@ export class CargoWorkerRuntime {
     if (!event) return false;
 
     try {
-      const parsed = await this.emailProvider(event.provider).fetchAndParse(
+      const parsed = await this.emailProvider(event).fetchAndParse(
         event.providerMessageId,
       );
       const rawObjectPath = await this.rawEmailStore.put(
         event.organizationId,
+        event.provider,
         event.providerMessageId,
         parsed.raw,
       );
@@ -88,7 +92,7 @@ export class CargoWorkerRuntime {
     const delivery = await this.repository.claimOutbox(this.workerId);
     if (!delivery) return false;
     try {
-      const sent = await this.emailProvider(delivery.provider).sendReply(
+      const sent = await this.emailProvider(delivery).sendReply(
         delivery.message,
       );
       await this.repository.markOutboxSent(delivery, sent);

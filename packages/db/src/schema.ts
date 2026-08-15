@@ -185,6 +185,19 @@ export const mailboxCursors = pgTable("mailbox_cursors", {
     .notNull(),
 });
 
+export const inboxCredentials = pgTable("inbox_credentials", {
+  inboxConnectionId: uuid("inbox_connection_id")
+    .primaryKey()
+    .references(() => inboxConnections.id, { onDelete: "cascade" }),
+  encryptedRefreshToken: text("encrypted_refresh_token").notNull(),
+  grantedScopes: text("granted_scopes")
+    .array()
+    .default(sql.raw("ARRAY[]::text[]"))
+    .notNull(),
+  tokenVersion: integer("token_version").default(1).notNull(),
+  ...timestamps,
+});
+
 export const inboundEvents = pgTable(
   "inbound_events",
   {
@@ -465,6 +478,10 @@ export const outboxJobs = pgTable(
     availableAt: timestamp("available_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
+    inboxConnectionId: uuid("inbox_connection_id").references(
+      () => inboxConnections.id,
+      { onDelete: "restrict" },
+    ),
     lockedAt: timestamp("locked_at", { withTimezone: true }),
     lockedBy: text("locked_by"),
     lastError: text("last_error"),
@@ -477,6 +494,7 @@ export const outboxJobs = pgTable(
       table.idempotencyKey,
     ),
     index("outbox_jobs_queue_idx").on(table.status, table.availableAt),
+    index("outbox_jobs_inbox_idx").on(table.inboxConnectionId),
   ],
 );
 

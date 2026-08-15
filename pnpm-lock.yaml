@@ -25,6 +25,9 @@ importers:
       "@cargo/contracts":
         specifier: workspace:*
         version: link:../../packages/contracts
+      "@cargo/security":
+        specifier: workspace:*
+        version: link:../../packages/security
       "@supabase/ssr":
         specifier: ^0.7.0
         version: 0.7.0(@supabase/supabase-js@2.112.3)
@@ -151,6 +154,15 @@ importers:
         specifier: ^3.2.4
         version: 3.2.7(@types/node@24.13.3)(supports-color@7.2.0)(tsx@4.23.12)
 
+  packages/security:
+    devDependencies:
+      "@types/node":
+        specifier: ^24.3.0
+        version: 24.13.3
+      vitest:
+        specifier: ^3.2.4
+        version: 3.2.7(@types/node@24.13.3)(supports-color@7.2.0)(tsx@4.23.12)
+
   services/worker:
     dependencies:
       "@cargo/ai":
@@ -165,6 +177,9 @@ importers:
       "@cargo/email":
         specifier: workspace:*
         version: link:../../packages/email
+      "@cargo/security":
+        specifier: workspace:*
+        version: link:../../packages/security
       "@supabase/supabase-js":
         specifier: ^2.57.4
         version: 2.112.3

@@ -18,11 +18,12 @@ export class SupabaseRawEmailStore implements RawEmailStore {
 
   async put(
     organizationId: string,
+    provider: "local_mailpit" | "gmail" | "microsoft",
     providerMessageId: string,
     raw: Buffer,
   ): Promise<string> {
     const safeMessageId = encodeURIComponent(providerMessageId);
-    const path = `${organizationId}/local_mailpit/${safeMessageId}.eml`;
+    const path = `${organizationId}/${provider}/${safeMessageId}.eml`;
     const { error } = await this.#client.storage
       .from("cargo-email-raw")
       .upload(path, raw, {
