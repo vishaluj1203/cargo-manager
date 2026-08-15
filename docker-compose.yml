@@ -1,0 +1,11 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: cargo
+      POSTGRES_PASSWORD: cargo
+      POSTGRES_DB: cargo_manager
+    ports: ["5432:5432"]
+    volumes: [cargo_manager_data:/var/lib/postgresql/data]
+volumes:
+  cargo_manager_data:
