@@ -93,7 +93,9 @@ const webImage = `${registry}/web:latest`;
 const workerImage = `${registry}/worker:latest`;
 
 const supabaseUrl = required("NEXT_PUBLIC_SUPABASE_URL");
-const supabaseKey = required("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY");
+const supabaseKey =
+  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY?.trim() ||
+  required("NEXT_PUBLIC_SUPABASE_ANON_KEY");
 const googleClientId = required("GOOGLE_OAUTH_CLIENT_ID");
 
 run(["config", "set", "project", projectId]);
@@ -313,7 +315,7 @@ run([
   "--timeout",
   "300",
   "--set-env-vars",
-  `NEXT_PUBLIC_SUPABASE_URL=${supabaseUrl},GOOGLE_OAUTH_CLIENT_ID=${googleClientId},AI_PROVIDER=${process.env.AI_PROVIDER ?? "google"},AI_BASE_URL=${process.env.AI_BASE_URL ?? "https://generativelanguage.googleapis.com/v1beta"},AI_MODEL=${process.env.AI_MODEL ?? "gemma-4-26b-a4b-it"},GMAIL_INITIAL_QUERY=${process.env.GMAIL_INITIAL_QUERY ?? "newer_than:7d"}`,
+  `NEXT_PUBLIC_SUPABASE_URL=${supabaseUrl},GOOGLE_OAUTH_CLIENT_ID=${googleClientId},AI_PROVIDER=${process.env.AI_PROVIDER ?? "google"},AI_BASE_URL=${process.env.AI_BASE_URL ?? "https://generativelanguage.googleapis.com/v1beta"},AI_MODEL=${process.env.AI_MODEL ?? "gemma-4-26b-a4b-it"},GMAIL_INITIAL_QUERY=${process.env.GMAIL_INITIAL_QUERY ?? 'newer_than:7d subject:"[Cargo Demo]"'}`,
   "--set-secrets",
   "DATABASE_URL=cargo-database-url:latest,SUPABASE_SERVICE_ROLE_KEY=cargo-supabase-service-role-key:latest,AI_API_KEY=cargo-ai-api-key:latest,GOOGLE_OAUTH_CLIENT_SECRET=cargo-google-oauth-client-secret:latest,INBOX_TOKEN_ENCRYPTION_KEY=cargo-inbox-token-encryption-key:latest",
   "--project",

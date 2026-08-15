@@ -24,7 +24,8 @@
     "supabase:link": "supabase link",
     "db:push": "node scripts/supabase-cloud.mjs push",
     "db:push:dry-run": "node scripts/supabase-cloud.mjs dry-run",
-    "deploy:gcp": "node deploy/gcp/deploy.mjs"
+    "deploy:gcp": "node deploy/gcp/deploy.mjs",
+    "deploy:gcp:web": "node deploy/gcp/deploy-web.mjs"
   },
   "devDependencies": {
     "prettier": "^3.6.2",

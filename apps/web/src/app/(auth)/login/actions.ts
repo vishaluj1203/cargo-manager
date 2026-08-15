@@ -46,7 +46,10 @@ export async function signUp(formData: FormData) {
   const supabase = await createClient();
   const { data, error } = await supabase.auth.signUp({
     ...parsed.data,
-    options: { data: { full_name: fullName || null } },
+    options: {
+      data: { full_name: fullName || null },
+      emailRedirectTo: `${process.env.APP_URL ?? "http://localhost:3000"}/auth/confirm`,
+    },
   });
   if (error) redirectWithMessage("error", error.message);
   if (!data.session) {

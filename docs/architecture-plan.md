@@ -118,7 +118,7 @@ Before onboarding real client data, add retention controls, account deletion/exp
 5. A worker atomically claims one event with a lease and `FOR UPDATE SKIP LOCKED`.
 6. Provider returns raw MIME; `mailparser` normalizes headers, addresses, text, HTML and attachments.
 7. Raw MIME is uploaded to the private bucket using a deterministic path.
-8. AI receives the latest message, bounded prior summary and bounded text attachments.
+8. AI receives the latest message, bounded prior summary and bounded text attachments. During the company-inbox demo, Gmail discovery is additionally restricted to recent subjects containing `[Cargo Demo]`.
 9. Gemma is forced to call one cargo extraction function; Cargo Manager validates its arguments with Zod and retries one malformed model response.
 10. One database transaction creates the email, contact, AI run, thread, ticket link, status history and audit event.
 11. Low-confidence extraction creates a `needs_verification` ticket. Otherwise the ticket starts as `new`.
@@ -237,7 +237,7 @@ Exit criterion: a Skyvalence Workspace test inbox runs for 72 hours without dupl
 
 ### Wave 4 — production deployment
 
-Status: container and provisioning assets complete; deployment blocked on GCP billing and Google OAuth credentials.
+Status: deployed to GCP London and connected to the Workspace Gmail inbox on 2026-08-16; end-to-end mailbox acceptance is waiting for a working hosted-AI credential.
 
 - Cloud Run web container built from `apps/web`
 - Private Cloud Run worker built from `services/worker`
@@ -246,6 +246,8 @@ Status: container and provisioning assets complete; deployment blocked on GCP bi
 - `app.skyvalence.com` DNS and TLS
 - Supabase production redirect URLs
 - Health checks, alarms, backups and rollback runbook
+
+Deployment evidence: the web and worker images built in Cloud Build, the web service returned a live login page, anonymous worker access returned 403, and the OIDC Cloud Scheduler invocation completed with zero processing failures. Current web URL: `https://cargo-manager-web-cjbvmtbt4a-nw.a.run.app`.
 
 Exit criterion: production smoke test, monitored queues and documented rollback.
 
@@ -285,13 +287,13 @@ Cost controls:
 
 ## 12. Current blockers and required owner inputs
 
-Local Mailpit plus live-AI acceptance is passing. Hosted Gmail acceptance now requires owner-controlled external configuration:
+Local Mailpit plus live-AI acceptance passed before the Gemini credits were depleted, and the London deployment is healthy. Remaining acceptance steps:
 
-1. Enable billing on GCP project `sky-valance-cargo-manager` (billing is currently disabled; Cloud Run still uses free allowances first).
-2. Configure Google Auth Platform and create a Web OAuth client with Gmail readonly/send scopes and the documented callback URLs.
-3. Put `GOOGLE_OAUTH_CLIENT_ID` and `GOOGLE_OAUTH_CLIENT_SECRET` in ignored `.env.local`—never in chat or Git.
-4. Generate `INBOX_TOKEN_ENCRYPTION_KEY` with `openssl rand -base64 32` and retain it in a password manager and Secret Manager.
-5. Add the final Cloud Run URL to Supabase Auth URL configuration and Google OAuth redirect URIs.
+1. Replace the exhausted Gemini credential with an approved hosted-AI credential and run `pnpm ai:smoke`.
+2. Resume `cargo-manager-worker-minute` only after that smoke test succeeds.
+3. Complete one synthetic hosted Gmail email → AI ticket → Gmail reply acceptance run using a subject containing `[Cargo Demo]`.
+4. Add the Cloud Run application URL to Supabase Auth URL configuration if hosted signup confirmation is used.
+5. Configure `app.skyvalence.com` routing and replace the temporary `run.app` callback URL when ready.
 
 The previously shared Gemini API key must be rotated before customer or production use because it appeared in chat history.
 
@@ -325,3 +327,5 @@ Decision log:
 - 2026-08-16: deploy both Next.js and the private worker to GCP Cloud Run; do not use Vercel Hobby for this commercial client demo.
 - 2026-08-16: deploy production compute in GCP London (`europe-west2`) for the initial UK-side rollout.
 - 2026-08-16: use per-user Gmail OAuth with encrypted refresh tokens and scheduled polling for the demo; add push/history synchronization after the first live-inbox acceptance period.
+- 2026-08-16: deployed the public web service and private scheduled worker to GCP London; hosted service, IAM and scheduler smoke checks passed.
+- 2026-08-16: connected `info@skyvalence.com`, quarantined 18 historical messages after the AI provider rejected them for exhausted credits, paused polling, and restricted demo discovery to `[Cargo Demo]` subjects.

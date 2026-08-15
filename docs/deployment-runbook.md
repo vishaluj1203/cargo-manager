@@ -4,9 +4,18 @@ This runbook deploys the Next.js product and the scheduled Gmail worker to `sky-
 
 Cloud Run uses London (`europe-west2`). The current Supabase project is in AWS Ireland (`eu-west-1`); use synthetic demo data until the customer confirms EU hosting is acceptable, or migrate to a new Supabase London project for strict UK residency.
 
-## Current gate
+## Current deployment
 
-Application containers, migrations and provisioning automation are ready. Deployment cannot complete until billing and Google OAuth are configured by the project owner.
+The first London deployment completed on 2026-08-16:
+
+- Web: `https://cargo-manager-web-cjbvmtbt4a-nw.a.run.app`
+- Worker: private Cloud Run service `cargo-manager-worker`
+- Trigger: OIDC Cloud Scheduler job `cargo-manager-worker-minute` (currently paused while the AI credential is replaced)
+- Region: GCP London (`europe-west2`)
+
+The web login returns 200, application routes enforce authentication, anonymous worker requests return 403, and Gmail OAuth is connected for `info@skyvalence.com`. The first poll safely exposed an exhausted Gemini API quota; 18 historical events were quarantined without creating tickets, and scheduled polling was paused. A synthetic Gmail round trip remains before client demonstration.
+
+The demo worker deliberately uses `GMAIL_INITIAL_QUERY='newer_than:7d subject:"[Cargo Demo]"'`. Keep that boundary in place while using a company inbox so unrelated historical or live mail is not imported.
 
 ## 1. One-time owner setup
 
@@ -90,12 +99,12 @@ In Supabase **Authentication → URL Configuration**:
 1. Open the application URL and create or sign into the demo account.
 2. Complete company onboarding.
 3. Open **Settings → Inboxes**, connect the Workspace mailbox and approve both Gmail scopes.
-4. Send a synthetic cargo email from a different mailbox to the connected address.
+4. Send a synthetic cargo email from a different mailbox to the connected address. Its subject must contain `[Cargo Demo]`.
 5. Wait up to two scheduler cycles and verify one ticket, AI fields, raw MIME and audit records.
 6. Reply from the ticket and verify the response reaches the sender in the original Gmail thread.
 7. Run the worker endpoint again through Scheduler and verify no duplicate ticket or email appears.
 
-Use synthetic content until the AI provider account is approved for real customer data.
+Use synthetic content until the AI provider account is approved for real customer data. Confirm `pnpm ai:smoke` succeeds with the production AI credential before resuming `cargo-manager-worker-minute`.
 
 ## 6. Rollback
 

@@ -6,9 +6,10 @@ import { createClient } from "@/lib/supabase/server";
 export async function GET(request: NextRequest) {
   const tokenHash = request.nextUrl.searchParams.get("token_hash");
   const type = request.nextUrl.searchParams.get("type") as EmailOtpType | null;
-  const destination = request.nextUrl.clone();
-  destination.pathname = "/onboarding";
-  destination.search = "";
+  const destination = new URL(
+    "/onboarding",
+    process.env.APP_URL ?? request.nextUrl.origin,
+  );
 
   if (tokenHash && type) {
     const supabase = await createClient();

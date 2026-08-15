@@ -6,23 +6,23 @@ import { googleAuthorizationUrl, googleOAuthConfig } from "@/lib/google-oauth";
 
 export const runtime = "nodejs";
 
-export async function GET(request: Request) {
+export async function GET() {
+  const { appUrl, encryptionKey } = googleOAuthConfig();
   const [user, membership] = await Promise.all([
     getAuthenticatedUser(),
     getCurrentWorkspace(),
   ]);
-  if (!user) return NextResponse.redirect(new URL("/login", request.url));
+  if (!user) return NextResponse.redirect(new URL("/login", appUrl));
   if (!membership) {
-    return NextResponse.redirect(new URL("/onboarding", request.url));
+    return NextResponse.redirect(new URL("/onboarding", appUrl));
   }
   if (!(["owner", "admin"] as string[]).includes(membership.role)) {
     return NextResponse.redirect(
-      new URL("/settings/inboxes?error=permission", request.url),
+      new URL("/settings/inboxes?error=permission", appUrl),
     );
   }
 
   const state = crypto.randomUUID();
-  const { encryptionKey, appUrl } = googleOAuthConfig();
   const envelope = encryptSecret(
     JSON.stringify({
       state,

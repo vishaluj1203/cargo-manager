@@ -20,8 +20,9 @@ const stateSchema = z.object({
 });
 
 function finish(request: NextRequest, query: string) {
+  const { appUrl } = googleOAuthConfig();
   const response = NextResponse.redirect(
-    new URL(`/settings/inboxes?${query}`, request.url),
+    new URL(`/settings/inboxes?${query}`, appUrl),
   );
   response.cookies.delete("cargo_google_oauth");
   return response;
