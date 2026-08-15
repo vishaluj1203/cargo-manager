@@ -38,7 +38,7 @@ Use one TypeScript monorepo with independently deployable web and worker process
 | Background work    | Local worker for acceptance; GCP Cloud Run worker for production | Email and AI work must not run inside short-lived web requests                   |
 | Local email        | Mailpit                                                          | Real SMTP/MIME/thread testing without sending external mail                      |
 | Production inbox   | Google Workspace Gmail API                                       | OAuth, push notifications/history sync and replies from the connected mailbox    |
-| AI extraction      | Together AI serverless, `Qwen/Qwen3.5-9B`                        | Lightweight open-weight model with hosted inference and structured JSON output   |
+| AI extraction      | Gemini API hosted `gemma-4-26b-a4b-it`                           | Open-weight MoE model, forced function output and no local model runtime         |
 | Observability      | Sentry and PostHog in deployment wave                            | Errors, worker failures and product feedback without blocking the demo           |
 
 Do not split frontend and backend into separate repositories now. Shared contracts, migrations and one atomic history are more valuable at this stage. The deployment boundary already exists at `apps/web` and `services/worker`.
@@ -51,7 +51,7 @@ services/worker        Inbox discovery, event processing and reply delivery
 packages/contracts     Shared Zod request, email and AI schemas
 packages/db            Drizzle schema and PostgreSQL connection
 packages/email         Mailpit provider, MIME parser and SMTP reply adapter
-packages/ai            Provider-neutral cargo extractor and Together adapter
+packages/ai            Provider-neutral cargo extractor and Google Gemma adapter
 supabase/migrations    Immutable hosted database evolution
 docs                   Architecture and operator runbooks
 ```
@@ -75,7 +75,7 @@ Gmail API / local Mailpit
       ▼
 Worker ─────► private raw-email bucket
   │
-  ├────► Together AI / Qwen structured extraction
+  ├────► Gemini API / Gemma forced-function extraction
   │
   └────► Supabase PostgreSQL
              │
@@ -115,7 +115,7 @@ Before onboarding real client data, add retention controls, account deletion/exp
 6. Provider returns raw MIME; `mailparser` normalizes headers, addresses, text, HTML and attachments.
 7. Raw MIME is uploaded to the private bucket using a deterministic path.
 8. AI receives the latest message, bounded prior summary and bounded text attachments.
-9. Together enforces the cargo JSON Schema; Cargo Manager validates it again with Zod.
+9. Gemma is forced to call one cargo extraction function; Cargo Manager validates its arguments with Zod and retries one malformed model response.
 10. One database transaction creates the email, contact, AI run, thread, ticket link, status history and audit event.
 11. Low-confidence extraction creates a `needs_verification` ticket. Otherwise the ticket starts as `new`.
 12. Duplicate events return the existing ticket and make no duplicate records.
@@ -142,9 +142,9 @@ Context is intentionally bounded:
 - latest email: 24,000 characters
 - prior thread summary: 4,000 characters
 - each text attachment: 12,000 characters
-- output: 1,500 tokens
+- output: 2,000 tokens
 
-Long conversations must be summarized incrementally; never resend an unlimited mailbox history. The production path always calls hosted Qwen. The fake extractor is test-only and returns declared fixtures; it does not pretend to parse an email.
+Long conversations must be summarized incrementally; never resend an unlimited mailbox history. The current path calls hosted Gemma. The fake extractor is test-only and returns declared fixtures; it does not pretend to parse an email. The Google free tier is restricted to synthetic demos because its data-use terms are not suitable for real customer cargo email; production requires an approved no-training service tier.
 
 ## 8. Reply and threading flow
 
@@ -187,17 +187,19 @@ Exit evidence: 15 application tables, RLS on all 15, 20 policies, private raw bu
 
 ### Wave 1 — local product acceptance
 
-Status: implementation substantially complete; real AI/storage secrets still required.
+Status: automated isolated acceptance passed on 2026-08-16; manual browser walkthrough remains.
 
 - Signup/sign-in and SSR session refresh
 - Company onboarding and local inbox creation
 - Cargo ticket queue and detail view
 - MIME ingestion and raw storage
-- Qwen structured extraction
+- Gemma forced-function extraction with Zod validation
 - Ticket creation and customer-reply workflow
 - Durable inbound and outbound retry queues
 - Real Mailpit SMTP/API round trip
 - One complete hosted-DB sample-email acceptance run
+
+Acceptance evidence: `pnpm e2e:smoke` passed authenticated onboarding, SMTP/MIME ingestion, private raw storage, live Gemma extraction, transactional ticket creation, authenticated reply queueing, SMTP delivery and RFC threading, then removed its temporary cloud records.
 
 Exit criterion: a new user onboards, a sample email becomes a correctly parsed ticket, an operator replies, and Mailpit shows a correctly threaded customer reply.
 
@@ -262,7 +264,7 @@ For the startup phase:
 
 - Vercel free tier: web UI and server actions.
 - Supabase free tier: Auth, PostgreSQL and small raw-email storage.
-- Together pay-as-used serverless inference: no idle GPU cost.
+- Gemini API free tier with hosted Gemma for synthetic demos only; move to an approved paid/no-training tier before customer data.
 - Cloud Run free allowance: worker only after local acceptance; scale to zero.
 - Mailpit: local and CI integration testing only.
 
@@ -282,7 +284,7 @@ Cost controls:
 The repository can compile and mocked flows can pass without secrets. A real acceptance run additionally requires:
 
 1. `SUPABASE_SERVICE_ROLE_KEY`: Supabase secret/service-role key for private raw MIME upload.
-2. `AI_API_KEY`: Together AI API key for the hosted Qwen call.
+2. `AI_API_KEY`: Google AI Studio API key for the hosted Gemma call.
 
 Keep both only in `.env.local` and later in the deployment secret stores. Never paste them into tickets, source files, screenshots or Git history.
 
@@ -293,7 +295,7 @@ Gmail integration will later require Google OAuth consent configuration and a se
 - A fresh account can create a cargo workspace.
 - Tenant isolation is verified with a second account or automated RLS test.
 - A realistic MIME email is stored privately.
-- Qwen produces schema-valid cargo extraction; no business-field regex parser is used.
+- Gemma produces schema-valid cargo extraction through a forced function call; no business-field regex parser is used.
 - One ticket is created with references, route, priority, action, deadline and confidence.
 - Reprocessing the same message creates no duplicate ticket or email.
 - Operator workflow changes create history and audit records.
@@ -311,5 +313,5 @@ Decision log:
 - 2026-08-16: one monorepo with separate web/worker deployment boundaries.
 - 2026-08-16: hosted Supabase only; no local PostgreSQL runtime.
 - 2026-08-16: local Mailpit acceptance before Gmail integration.
-- 2026-08-16: hosted open-weight Qwen through a provider-neutral adapter; no local model runtime.
+- 2026-08-16: hosted open-weight Gemma 4 through the Gemini API; forced function output, local Zod validation and no local model runtime. This supersedes the initial Together/Qwen choice.
 - 2026-08-16: no cloud application deployment before the local end-to-end gate passes.

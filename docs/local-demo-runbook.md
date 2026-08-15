@@ -9,7 +9,7 @@ Put values in ignored `.env.local`:
 - Supabase URL and publishable key
 - Supabase PostgreSQL transaction and direct URLs
 - Supabase secret/service-role key
-- Together AI API key
+- Google AI Studio API key
 - local application and Mailpit defaults from `.env.example`
 
 Never commit `.env.local`.
@@ -51,7 +51,7 @@ Use any SMTP client configured for `127.0.0.1:1025`, with:
 - Subject: a realistic booking, status, documentation, delay or customs request
 - Body: include a shipment reference, route, requested action and any deadline in natural language
 
-Do not encode expected cargo fields in the worker. The email body must be interpreted by Qwen.
+Do not encode expected cargo fields in the worker. The email body must be interpreted by Gemma.
 
 The worker should discover and process the message within a few seconds. Verify:
 
@@ -82,10 +82,26 @@ pnpm mail:smoke
 
 This creates a uniquely addressed sample email and verifies MIME parsing plus a real threaded SMTP reply. It does not create a Cargo Manager ticket.
 
+## Independent live AI smoke test
+
+```bash
+pnpm ai:smoke
+```
+
+This submits a synthetic customs-hold email to Google-hosted Gemma, requires the model to call the cargo extraction function and validates the returned arguments with the shared Zod contract. Google free-tier requests must contain synthetic data only.
+
+## Complete isolated acceptance test
+
+```bash
+pnpm e2e:smoke
+```
+
+This command uses the real onboarding and reply RPCs. It creates a temporary confirmed Supabase user and freight-forwarder workspace with a unique Mailpit inbox, sends one synthetic customer email, runs the worker and Gemma, verifies the stored ticket and raw MIME, queues a reply as the authenticated operator, and verifies the outbound RFC thread. Its `finally` cleanup removes the temporary organization, user and raw object even when a test assertion fails.
+
 ## Common failures
 
 - `service-role key required`: fill `SUPABASE_SERVICE_ROLE_KEY` with the Supabase server secret key.
-- `AI_API_KEY is required`: create a Together API key and fill `AI_API_KEY`.
+- `AI_API_KEY is required`: create a Google AI Studio key and fill `AI_API_KEY`.
 - Mailpit connection refused: run `brew services info mailpit`, then restart the service.
 - Database connection error: copy both URLs from Supabase **Connect**, keeping the password URL-encoded.
 - Ticket not visible: verify onboarding succeeded and RLS membership exists.

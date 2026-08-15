@@ -20,10 +20,10 @@ function normalizedSubject(subject: string): string {
   return value || "(no subject)";
 }
 
-function parsedDeadline(value: string | null): Date | null {
+function parsedDeadline(value: string | null): string | null {
   if (!value) return null;
   const result = new Date(value);
-  return Number.isNaN(result.getTime()) ? null : result;
+  return Number.isNaN(result.getTime()) ? null : result.toISOString();
 }
 
 function retryDelaySeconds(attempts: number): number {
@@ -54,7 +54,7 @@ export class PostgresWorkerRepository implements WorkerRepository {
         organization_id, inbox_connection_id, provider_event_id, payload, status
       ) values (
         ${inbox.organizationId}, ${inbox.id}, ${providerMessageId},
-        ${sqlClient.json({ providerMessageId, ...metadata })}, 'pending'
+        ${JSON.stringify({ providerMessageId, ...metadata })}::jsonb, 'pending'
       )
       on conflict (organization_id, inbox_connection_id, provider_event_id) do nothing
       returning id
@@ -158,8 +158,8 @@ export class PostgresWorkerRepository implements WorkerRepository {
           ${event.organizationId}, ${threadId}, ${event.id}, 'inbound', ${event.provider},
           ${event.providerMessageId}, ${email.messageId}, ${email.inReplyTo},
           ${transaction.array(email.references)}, ${email.from.name}, ${email.from.address},
-          ${transaction.json(email.to)}, ${transaction.json(email.cc)}, ${email.subject},
-          ${email.text}, ${email.html}, ${rawObjectPath}, 'received', ${email.receivedAt}
+          ${JSON.stringify(email.to)}::jsonb, ${JSON.stringify(email.cc)}::jsonb, ${email.subject},
+          ${email.text}, ${email.html}, ${rawObjectPath}, 'received', ${email.receivedAt.toISOString()}
         )
         returning id
       `;
@@ -187,7 +187,7 @@ export class PostgresWorkerRepository implements WorkerRepository {
           ${event.organizationId}, ${emailId}, 'succeeded', ${extraction.provider},
           ${extraction.model}, ${extraction.promptVersion}, ${extraction.schemaVersion},
           ${extraction.usage.inputTokens}, ${extraction.usage.outputTokens},
-          ${transaction.json(extraction.extraction)}, now(), now()
+          ${JSON.stringify(extraction.extraction)}::jsonb, now(), now()
         )
       `;
 
@@ -243,7 +243,7 @@ export class PostgresWorkerRepository implements WorkerRepository {
             ${extraction.extraction.priority}, ${triageStatus},
             ${extraction.extraction.requestedAction}, ${extraction.extraction.origin},
             ${extraction.extraction.destination}, ${parsedDeadline(extraction.extraction.deadline)},
-            ${transaction.json(extraction.extraction.shipmentReferences)},
+            ${JSON.stringify(extraction.extraction.shipmentReferences)}::jsonb,
             ${transaction.array(extraction.extraction.missingInformation)},
             ${extraction.extraction.confidence}
           )
@@ -272,12 +272,12 @@ export class PostgresWorkerRepository implements WorkerRepository {
           organization_id, ticket_id, actor_type, actor_id, event_type, data
         ) values (
           ${event.organizationId}, ${ticketId}, 'system', ${event.id},
-          'email.ingested', ${transaction.json({
+          'email.ingested', ${JSON.stringify({
             emailId,
             provider: event.provider,
             providerMessageId: event.providerMessageId,
             aiConfidence: extraction.extraction.confidence,
-          })}
+          })}::jsonb
         )
       `;
       await transaction`
@@ -387,13 +387,13 @@ export class PostgresWorkerRepository implements WorkerRepository {
     await sqlClient.begin(async (transaction) => {
       await transaction`
         update public.outbox_jobs
-        set status = 'sent', sent_at = ${sent.sentAt}, locked_at = null, locked_by = null
+        set status = 'sent', sent_at = ${sent.sentAt.toISOString()}, locked_at = null, locked_by = null
         where id = ${delivery.jobId}
       `;
       await transaction`
         update public.emails
         set provider_message_id = ${sent.providerMessageId}, rfc_message_id = ${sent.messageId},
-            delivery_status = 'sent', sent_at = ${sent.sentAt}
+            delivery_status = 'sent', sent_at = ${sent.sentAt.toISOString()}
         where id = ${delivery.emailId}
       `;
       await transaction`
@@ -401,7 +401,7 @@ export class PostgresWorkerRepository implements WorkerRepository {
           organization_id, ticket_id, actor_type, actor_id, event_type, data
         ) values (
           ${delivery.organizationId}, ${delivery.ticketId}, 'system', ${delivery.jobId},
-          'email.sent', ${transaction.json({ emailId: delivery.emailId, messageId: sent.messageId })}
+          'email.sent', ${JSON.stringify({ emailId: delivery.emailId, messageId: sent.messageId })}::jsonb
         )
       `;
     });

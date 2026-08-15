@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "tsx watch src/cli.ts run",
     "once": "tsx src/cli.ts once",
+    "smoke:e2e": "tsx scripts/e2e-smoke.ts",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
@@ -17,10 +18,12 @@
     "@cargo/db": "workspace:*",
     "@cargo/email": "workspace:*",
     "@supabase/supabase-js": "^2.57.4",
+    "nodemailer": "^7.0.6",
     "postgres": "^3.4.7"
   },
   "devDependencies": {
     "@types/node": "^24.3.0",
+    "@types/nodemailer": "^7.0.1",
     "tsx": "^4.20.5",
     "vitest": "^3.2.4"
   }

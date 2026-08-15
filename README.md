@@ -2,7 +2,7 @@
 
 Cargo Manager is Skyvalence’s email-native cargo operations desk. It ingests customer email, extracts operational facts with hosted open-weight AI, creates accountable tickets and sends threaded replies from those tickets.
 
-The current implementation uses Next.js, hosted Supabase PostgreSQL/Auth/Storage, a durable TypeScript worker, local Mailpit and Together AI Qwen.
+The current implementation uses Next.js, hosted Supabase PostgreSQL/Auth/Storage, a durable TypeScript worker, local Mailpit and Google-hosted open-weight Gemma 4.
 
 ## Start locally
 
@@ -25,10 +25,12 @@ pnpm test
 pnpm lint
 pnpm build
 pnpm mail:smoke
+pnpm ai:smoke
+pnpm e2e:smoke
 pnpm --filter @cargo/db verify:cloud
 pnpm worker:once
 ```
 
-`mail:smoke` tests real local SMTP, raw MIME parsing and reply threading without touching customer mail. `worker:once` requires the Supabase secret/service-role key and Together AI key.
+`mail:smoke` tests real local SMTP, raw MIME parsing and reply threading without touching customer mail. `ai:smoke` sends a synthetic cargo email directly to hosted Gemma and validates its function-call output. `e2e:smoke` creates an isolated temporary user/workspace, tests the whole email-to-ticket-to-reply path and removes its cloud test data. `worker:once` requires the Supabase secret/service-role key and Google AI key.
 
 See [the architecture and delivery plan](docs/architecture-plan.md) and [the local demo runbook](docs/local-demo-runbook.md).

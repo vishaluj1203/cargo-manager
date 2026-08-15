@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   buildExtractionContext,
   FakeCargoExtractor,
-  TogetherCargoExtractor,
+  GoogleGemmaCargoExtractor,
 } from "./index.js";
 
 const fixture = {
@@ -27,6 +27,30 @@ const fixture = {
   missingInformation: [],
   confidence: 0.96,
 };
+
+function gemmaResponse(args: unknown) {
+  return new Response(
+    JSON.stringify({
+      candidates: [
+        {
+          finishReason: "STOP",
+          content: {
+            parts: [
+              {
+                functionCall: {
+                  name: "record_cargo_email_extraction",
+                  args,
+                },
+              },
+            ],
+          },
+        },
+      ],
+      usageMetadata: { promptTokenCount: 100, candidatesTokenCount: 80 },
+    }),
+    { status: 200, headers: { "content-type": "application/json" } },
+  );
+}
 
 describe("cargo AI adapter", () => {
   it("bounds untrusted email context", () => {
@@ -54,22 +78,11 @@ describe("cargo AI adapter", () => {
     ).resolves.toMatchObject({ extraction: fixture, provider: "fake" });
   });
 
-  it("requests and validates Together structured output", async () => {
-    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          choices: [
-            {
-              finish_reason: "stop",
-              message: { content: JSON.stringify(fixture) },
-            },
-          ],
-          usage: { prompt_tokens: 100, completion_tokens: 80 },
-        }),
-        { status: 200, headers: { "content-type": "application/json" } },
-      ),
-    );
-    const extractor = new TogetherCargoExtractor({
+  it("forces and validates a Gemma extraction function call", async () => {
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(gemmaResponse(fixture));
+    const extractor = new GoogleGemmaCargoExtractor({
       apiKey: "test-key",
       fetcher,
     });
@@ -82,9 +95,45 @@ describe("cargo AI adapter", () => {
     });
 
     expect(result.extraction).toEqual(fixture);
-    const request = JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body));
-    expect(request.model).toBe("Qwen/Qwen3.5-9B");
-    expect(request.response_format.type).toBe("json_schema");
-    expect(request.reasoning).toEqual({ enabled: false });
+    expect(result.provider).toBe("google-gemini-api");
+    const [url, init] = fetcher.mock.calls[0] ?? [];
+    const request = JSON.parse(String(init?.body));
+    expect(String(url)).toContain("/models/gemma-4-26b-a4b-it:generateContent");
+    expect(new Headers(init?.headers).get("x-goog-api-key")).toBe("test-key");
+    expect(request.toolConfig.functionCallingConfig.mode).toBe("ANY");
+    expect(request.tools[0].functionDeclarations[0].name).toBe(
+      "record_cargo_email_extraction",
+    );
+    expect(
+      JSON.stringify(request.tools[0].functionDeclarations[0].parameters),
+    ).not.toContain("additionalProperties");
+    expect(request.generationConfig.thinkingConfig.thinkingLevel).toBe(
+      "minimal",
+    );
+  });
+
+  it("retries once when Gemma returns schema-invalid arguments", async () => {
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(gemmaResponse({ ...fixture, confidence: 8 }))
+      .mockResolvedValueOnce(gemmaResponse(fixture));
+    const extractor = new GoogleGemmaCargoExtractor({
+      apiKey: "test-key",
+      fetcher,
+    });
+
+    const result = await extractor.extract({
+      subject: "Container status",
+      sender: "maya@example.com",
+      receivedAt: new Date("2026-08-16T00:00:00Z"),
+      latestMessage: "Please confirm container status.",
+    });
+
+    expect(result.extraction).toEqual(fixture);
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    const retry = JSON.parse(String(fetcher.mock.calls[1]?.[1]?.body));
+    expect(retry.contents[0].parts[0].text).toContain(
+      "<validation_correction>",
+    );
   });
 });

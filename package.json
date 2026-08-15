@@ -12,6 +12,8 @@
     "dev:worker": "pnpm --filter @cargo/worker dev",
     "worker:once": "pnpm --filter @cargo/worker once",
     "mail:smoke": "pnpm --filter @cargo/email smoke",
+    "ai:smoke": "pnpm --filter @cargo/ai smoke",
+    "e2e:smoke": "pnpm --filter @cargo/worker smoke:e2e",
     "build": "turbo build",
     "typecheck": "turbo typecheck",
     "test": "turbo test",
