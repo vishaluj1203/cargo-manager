@@ -7,5 +7,13 @@ services:
       POSTGRES_DB: cargo_manager
     ports: ["5432:5432"]
     volumes: [cargo_manager_data:/var/lib/postgresql/data]
+  # Optional local AI. Start Ollama separately on macOS/Linux, then run:
+  # ollama pull qwen2.5:1.5b-instruct
+  ollama:
+    image: ollama/ollama:latest
+    profiles: ["ai"]
+    ports: ["11434:11434"]
+    volumes: [ollama_data:/root/.ollama]
 volumes:
   cargo_manager_data:
+  ollama_data:

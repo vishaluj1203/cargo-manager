@@ -29,6 +29,8 @@ curl -X POST http://localhost:3000/api/inbound/email \
   -d '{"messageId":"demo-1","from":"ops@example.com","to":"support@example.com","subject":"Container delay","text":"Please help with our delayed container."}'
 ```
 
+The inbound flow now sends the email to the configured lightweight AI parser first. With Ollama running the default Qwen2.5 1.5B Instruct model, the extracted category, priority, shipment reference, summary, and requested action are persisted with the ticket. Without `AI_BASE_URL`/Ollama, the endpoint intentionally fails rather than silently pretending that AI extraction happened.
+
 ## Product and engineering record
 
 Read [docs/architecture.md](docs/architecture.md) for boundaries, flows, security, and a staged roadmap. Every material decision belongs in [docs/decisions](docs/decisions), and shipped changes should be recorded in [CHANGELOG.md](CHANGELOG.md).
