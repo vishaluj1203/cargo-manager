@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   buildExtractionContext,
+  createCargoExtractorFromEnv,
   FakeCargoExtractor,
   GoogleGemmaCargoExtractor,
 } from "./index.js";
@@ -135,5 +136,46 @@ describe("cargo AI adapter", () => {
     expect(retry.contents[0].parts[0].text).toContain(
       "<validation_correction>",
     );
+  });
+
+  it("fails closed when Google rejects the request instead of using defaults", async () => {
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(
+        new Response(
+          JSON.stringify({ error: { message: "invalid API key" } }),
+          { status: 401, headers: { "content-type": "application/json" } },
+        ),
+      );
+    const extractor = new GoogleGemmaCargoExtractor({
+      apiKey: "invalid-test-key",
+      fetcher,
+    });
+
+    await expect(
+      extractor.extract({
+        subject: "Booking request",
+        sender: "customer@example.com",
+        receivedAt: new Date("2026-08-16T00:00:00Z"),
+        latestMessage: "Please book one pallet from Chennai to Dubai.",
+      }),
+    ).rejects.toThrow("Google Gemini API request failed (401)");
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it("never selects the fake extractor from environment configuration", () => {
+    expect(() =>
+      createCargoExtractorFromEnv({
+        AI_PROVIDER: "fake",
+        AI_API_KEY: "unused",
+      }),
+    ).toThrow("Unsupported AI_PROVIDER: fake");
+
+    expect(
+      createCargoExtractorFromEnv({
+        AI_PROVIDER: "google",
+        AI_API_KEY: "configured-key",
+      }),
+    ).toBeInstanceOf(GoogleGemmaCargoExtractor);
   });
 });
