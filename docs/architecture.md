@@ -35,6 +35,8 @@ Production AI setup:
 3. Set `AI_BASE_URL` to the endpoint base URL, `AI_MODEL` to the deployed model name, and `AI_API_KEY` to the secret in Vercel.
 4. Run evaluation fixtures against representative cargo emails before enabling automatic priority or routing.
 
+The committed SQL files are the deployment source of truth for this early phase. Apply them with `pnpm db:apply` to a fresh database; later, once the schema stabilizes, consolidate them into a generated migration journal.
+
 ## Data model
 
 - `contacts`: normalized customer identity.

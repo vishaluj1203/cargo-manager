@@ -17,7 +17,7 @@ Cargo Manager is an evolving, email-first ticketing system for cargo operations.
 cp .env.example .env
 docker compose up -d
 pnpm install
-pnpm db:migrate
+pnpm db:apply
 pnpm dev
 ```
 
@@ -38,7 +38,7 @@ Read [docs/architecture.md](docs/architecture.md) for boundaries, flows, securit
 ## Deployment
 
 1. Create a Supabase project and copy its pooled PostgreSQL connection string to `DATABASE_URL`.
-2. Run `pnpm db:migrate` against that database from a trusted environment.
+2. Run `pnpm db:apply` against that database from a trusted environment. For an already initialized database, apply only new numbered SQL migrations.
 3. Import this repository into Vercel and configure `DATABASE_URL`, `APP_URL`, `INBOUND_WEBHOOK_SECRET`, `EMAIL_PROVIDER`, and `EMAIL_FROM`.
 4. Configure the inbound email provider to POST its normalized payload to `/api/inbound/email`.
 
