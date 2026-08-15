@@ -314,4 +314,5 @@ Decision log:
 - 2026-08-16: hosted Supabase only; no local PostgreSQL runtime.
 - 2026-08-16: local Mailpit acceptance before Gmail integration.
 - 2026-08-16: hosted open-weight Gemma 4 through the Gemini API; forced function output, local Zod validation and no local model runtime. This supersedes the initial Together/Qwen choice.
+- 2026-08-16: cargo location codes require structured route roles and deterministic reference validation; the current flat origin/destination contract is retained only until the proposed migration is implemented. Research and live-model evidence are recorded in [cargo email location-code research](research/cargo-email-location-codes.md).
 - 2026-08-16: no cloud application deployment before the local end-to-end gate passes.

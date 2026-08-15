@@ -33,4 +33,4 @@ pnpm worker:once
 
 `mail:smoke` tests real local SMTP, raw MIME parsing and reply threading without touching customer mail. `ai:smoke` sends a synthetic cargo email directly to hosted Gemma and validates its function-call output. `e2e:smoke` creates an isolated temporary user/workspace, tests the whole email-to-ticket-to-reply path and removes its cloud test data. `worker:once` requires the Supabase secret/service-role key and Google AI key.
 
-See [the architecture and delivery plan](docs/architecture-plan.md) and [the local demo runbook](docs/local-demo-runbook.md).
+See [the architecture and delivery plan](docs/architecture-plan.md), [the local demo runbook](docs/local-demo-runbook.md) and [the cargo email location-code research](docs/research/cargo-email-location-codes.md).
