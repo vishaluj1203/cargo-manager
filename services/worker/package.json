@@ -1,0 +1,27 @@
+{
+  "name": "@cargo/worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/cli.ts run",
+    "once": "tsx src/cli.ts once",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "lint": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@cargo/ai": "workspace:*",
+    "@cargo/contracts": "workspace:*",
+    "@cargo/db": "workspace:*",
+    "@cargo/email": "workspace:*",
+    "@supabase/supabase-js": "^2.57.4",
+    "postgres": "^3.4.7"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.0",
+    "tsx": "^4.20.5",
+    "vitest": "^3.2.4"
+  }
+}

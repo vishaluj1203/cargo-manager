@@ -1,0 +1,32 @@
+{
+  "name": "cargo-manager",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@11.21.0",
+  "engines": {
+    "node": ">=20.9"
+  },
+  "scripts": {
+    "dev": "turbo dev",
+    "dev:web": "pnpm --filter @cargo/web dev",
+    "dev:worker": "pnpm --filter @cargo/worker dev",
+    "worker:once": "pnpm --filter @cargo/worker once",
+    "mail:smoke": "pnpm --filter @cargo/email smoke",
+    "build": "turbo build",
+    "typecheck": "turbo typecheck",
+    "test": "turbo test",
+    "lint": "turbo lint",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "db:generate": "pnpm --filter @cargo/db generate",
+    "supabase:link": "supabase link",
+    "db:push": "node scripts/supabase-cloud.mjs push",
+    "db:push:dry-run": "node scripts/supabase-cloud.mjs dry-run"
+  },
+  "devDependencies": {
+    "prettier": "^3.6.2",
+    "supabase": "^2.39.2",
+    "turbo": "^2.5.6",
+    "typescript": "^5.9.2"
+  }
+}
