@@ -25,7 +25,7 @@ function loadLocalEnvironment() {
 export async function createWorkerRuntime() {
   loadLocalEnvironment();
   const [
-    { createCargoExtractorFromEnv },
+    { createCargoExtractorFromEnv, createEnquiryClassifierFromEnv },
     { createEmailProviderFromEnv, GmailEmailProvider },
     { decryptSecret },
     { PostgresWorkerRepository },
@@ -44,6 +44,7 @@ export async function createWorkerRuntime() {
   const localEmail = createEmailProviderFromEnv();
   const gmailProviders = new Map<string, EmailProvider>();
   const extractor = createCargoExtractorFromEnv();
+  const classifier = createEnquiryClassifierFromEnv();
   const rawStore = new SupabaseRawEmailStore(
     process.env.NEXT_PUBLIC_SUPABASE_URL ?? "",
     process.env.SUPABASE_SERVICE_ROLE_KEY ?? "",
@@ -91,6 +92,7 @@ export async function createWorkerRuntime() {
       repository,
       providerFor,
       extractor,
+      classifier,
       rawStore,
     ),
   };

@@ -176,10 +176,13 @@ for (const [accountId, displayName] of [
 const secrets = {
   "cargo-database-url": databaseUrl(),
   "cargo-supabase-service-role-key": required("SUPABASE_SERVICE_ROLE_KEY"),
-  "cargo-ai-api-key": required("AI_API_KEY"),
+  "cargo-groq-api-key": required("GROQ_API_KEY"),
   "cargo-google-oauth-client-secret": required("GOOGLE_OAUTH_CLIENT_SECRET"),
   "cargo-inbox-token-encryption-key": required("INBOX_TOKEN_ENCRYPTION_KEY"),
 };
+if (process.env.AI_API_KEY?.trim()) {
+  secrets["cargo-ai-api-key"] = process.env.AI_API_KEY.trim();
+}
 for (const [name, value] of Object.entries(secrets))
   syncSecret(projectId, name, value);
 
@@ -315,9 +318,18 @@ run([
   "--timeout",
   "300",
   "--set-env-vars",
-  `NEXT_PUBLIC_SUPABASE_URL=${supabaseUrl},GOOGLE_OAUTH_CLIENT_ID=${googleClientId},AI_PROVIDER=${process.env.AI_PROVIDER ?? "google"},AI_BASE_URL=${process.env.AI_BASE_URL ?? "https://generativelanguage.googleapis.com/v1beta"},AI_MODEL=${process.env.AI_MODEL ?? "gemma-4-26b-a4b-it"},GMAIL_INITIAL_QUERY=${process.env.GMAIL_INITIAL_QUERY ?? 'newer_than:7d subject:"[Cargo Demo]"'}`,
+  `NEXT_PUBLIC_SUPABASE_URL=${supabaseUrl},GOOGLE_OAUTH_CLIENT_ID=${googleClientId},AI_PROVIDER=${process.env.AI_PROVIDER ?? "groq"},GROQ_BASE_URL=${process.env.GROQ_BASE_URL ?? "https://api.groq.com/openai/v1"},GROQ_MODEL=${process.env.GROQ_MODEL ?? "openai/gpt-oss-20b"},AI_BASE_URL=${process.env.AI_BASE_URL ?? "https://generativelanguage.googleapis.com/v1beta"},AI_MODEL=${process.env.AI_MODEL ?? "gemma-4-26b-a4b-it"},GMAIL_INITIAL_QUERY=${process.env.GMAIL_INITIAL_QUERY ?? 'newer_than:7d subject:"[Cargo Demo]"'}`,
   "--set-secrets",
-  "DATABASE_URL=cargo-database-url:latest,SUPABASE_SERVICE_ROLE_KEY=cargo-supabase-service-role-key:latest,AI_API_KEY=cargo-ai-api-key:latest,GOOGLE_OAUTH_CLIENT_SECRET=cargo-google-oauth-client-secret:latest,INBOX_TOKEN_ENCRYPTION_KEY=cargo-inbox-token-encryption-key:latest",
+  [
+    "DATABASE_URL=cargo-database-url:latest",
+    "SUPABASE_SERVICE_ROLE_KEY=cargo-supabase-service-role-key:latest",
+    "GROQ_API_KEY=cargo-groq-api-key:latest",
+    ...(secrets["cargo-ai-api-key"]
+      ? ["AI_API_KEY=cargo-ai-api-key:latest"]
+      : []),
+    "GOOGLE_OAUTH_CLIENT_SECRET=cargo-google-oauth-client-secret:latest",
+    "INBOX_TOKEN_ENCRYPTION_KEY=cargo-inbox-token-encryption-key:latest",
+  ].join(","),
   "--project",
   projectId,
 ]);

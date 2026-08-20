@@ -3,9 +3,12 @@ import { describe, expect, it, vi } from "vitest";
 import {
   buildExtractionContext,
   createCargoExtractorFromEnv,
+  createEnquiryClassifierFromEnv,
   FakeCargoExtractor,
   GoogleGemmaCargoExtractor,
+  GoogleGemmaEnquiryClassifier,
   GroqCargoExtractor,
+  GroqEnquiryClassifier,
 } from "./index.js";
 
 const fixture = {
@@ -28,6 +31,13 @@ const fixture = {
   deadline: "2026-08-21",
   missingInformation: [],
   confidence: 0.96,
+};
+
+const classificationFixture = {
+  decision: "new_quote_enquiry" as const,
+  reason: "The sender requests a freight rate for a prospective shipment.",
+  evidence: ["Please quote your best air freight rate"],
+  confidence: 0.97,
 };
 
 function gemmaResponse(args: unknown) {
@@ -308,5 +318,103 @@ describe("cargo AI adapter", () => {
         GROQ_API_KEY: "configured-key",
       }),
     ).toBeInstanceOf(GroqCargoExtractor);
+  });
+
+  it("forces and validates Groq quote-enquiry classification", async () => {
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(groqResponse(classificationFixture));
+    const classifier = new GroqEnquiryClassifier({
+      apiKey: "groq-test-key",
+      fetcher,
+    });
+
+    const result = await classifier.classify({
+      subject: "Air freight quote BOM to LHR",
+      sender: "maya@example.com",
+      receivedAt: new Date("2026-08-21T00:00:00Z"),
+      latestMessage: "Please quote 12 cartons, 480 kg, from BOM to LHR.",
+    });
+
+    expect(result).toMatchObject({
+      classification: classificationFixture,
+      provider: "groq",
+      model: "openai/gpt-oss-20b",
+      promptVersion: "freight-quote-enquiry-v1",
+      schemaVersion: "enquiry-classification-v1",
+    });
+    const request = JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body));
+    expect(request.response_format).toMatchObject({
+      type: "json_schema",
+      json_schema: {
+        name: "record_enquiry_classification",
+        strict: true,
+      },
+    });
+  });
+
+  it("retries malformed Groq quote-enquiry classification once", async () => {
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        groqResponse({ ...classificationFixture, confidence: 8 }),
+      )
+      .mockResolvedValueOnce(groqResponse(classificationFixture));
+    const classifier = new GroqEnquiryClassifier({
+      apiKey: "groq-test-key",
+      fetcher,
+    });
+
+    await expect(
+      classifier.classify({
+        subject: "Quote request",
+        sender: "maya@example.com",
+        receivedAt: new Date("2026-08-21T00:00:00Z"),
+        latestMessage: "Please quote BOM to LHR.",
+      }),
+    ).resolves.toMatchObject({ classification: classificationFixture });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    const retry = JSON.parse(String(fetcher.mock.calls[1]?.[1]?.body));
+    expect(retry.messages[1].content).toContain("<validation_correction>");
+  });
+
+  it("fails closed when Groq quote-enquiry classification fails", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify({ error: { message: "unavailable" } }), {
+        status: 503,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    const classifier = new GroqEnquiryClassifier({
+      apiKey: "groq-test-key",
+      fetcher,
+    });
+
+    await expect(
+      classifier.classify({
+        subject: "Quote request",
+        sender: "maya@example.com",
+        receivedAt: new Date("2026-08-21T00:00:00Z"),
+        latestMessage: "Please quote BOM to LHR.",
+      }),
+    ).rejects.toThrow("Groq API request failed (503)");
+  });
+
+  it("supports Google classification and rejects fake production providers", () => {
+    expect(
+      createEnquiryClassifierFromEnv({
+        AI_PROVIDER: "google",
+        AI_API_KEY: "configured-key",
+      }),
+    ).toBeInstanceOf(GoogleGemmaEnquiryClassifier);
+    expect(
+      createEnquiryClassifierFromEnv({
+        AI_PROVIDER: "groq",
+        GROQ_API_KEY: "configured-key",
+      }),
+    ).toBeInstanceOf(GroqEnquiryClassifier);
+    expect(() =>
+      createEnquiryClassifierFromEnv({ AI_PROVIDER: "fake" }),
+    ).toThrow("Unsupported AI_PROVIDER: fake");
   });
 });

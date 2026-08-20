@@ -16,7 +16,7 @@ for (const key of ["DATABASE_URL", "DIRECT_DATABASE_URL"] as const) {
 const [
   { createClient },
   { default: nodemailer },
-  { createCargoExtractorFromEnv },
+  { createCargoExtractorFromEnv, createEnquiryClassifierFromEnv },
   { createEmailProviderFromEnv },
   { sqlClient },
   { PostgresWorkerRepository },
@@ -78,6 +78,7 @@ let outsiderUserId: string | null = null;
 let organizationId: string | null = null;
 let outsiderOrganizationId: string | null = null;
 let rawObjectPath: string | null = null;
+let ignoredRawObjectPath: string | null = null;
 let failedRawObjectPath: string | null = null;
 let repository: InstanceType<typeof PostgresWorkerRepository> | null = null;
 
@@ -156,11 +157,21 @@ try {
   if (outsiderOnboardingError) throw outsiderOnboardingError;
   outsiderOrganizationId = createdOutsiderOrganization as string;
 
+  const { data: inboxRows, error: inboxLookupError } = await userClient
+    .from("inbox_connections")
+    .select("id")
+    .eq("organization_id", organizationId)
+    .eq("address", inboxAddress);
+  if (inboxLookupError) throw inboxLookupError;
+  const inboxId = inboxRows?.[0]?.id;
+  if (!inboxId) throw new Error("Onboarding did not create the test inbox");
+
   repository = new PostgresWorkerRepository(organizationId);
   const runtime = new CargoWorkerRuntime(
     repository,
     () => provider,
     createCargoExtractorFromEnv(),
+    createEnquiryClassifierFromEnv(),
     new SupabaseRawEmailStore(supabaseUrl, serviceRoleKey),
     `e2e-${marker}`,
   );
@@ -174,12 +185,12 @@ try {
   await smtp.sendMail({
     from: `Maya Chen <${customerAddress}>`,
     to: `Cargo E2E Desk <${inboxAddress}>`,
-    subject: "Urgent status needed for container TCLU1234567",
+    subject: "[Cargo Demo] Ocean freight quotation SIN to RTM",
     messageId: inboundMessageId,
     text: `Hello team,
 
-Please confirm the current location of container TCLU1234567 moving from Singapore to Rotterdam.
-The consignee needs delivery by Friday, 21 August 2026. Is it still on schedule?
+Please quote your best ocean freight rate for container TCLU1234567 moving from Singapore to Rotterdam.
+The consignee needs delivery by Friday, 21 August 2026. Please include transit time, validity and applicable surcharges.
 
 Thanks,
 Maya Chen
@@ -189,21 +200,108 @@ North Star Imports`,
   const inboundMail = await waitForMail(inboxAddress, marker);
   rawObjectPath = `${organizationId}/local_mailpit/${encodeURIComponent(inboundMail.providerMessageId)}.eml`;
 
-  const discovered = await runtime.discoverInbound();
+  const { error: scanRequestError } = await userClient.rpc(
+    "request_inbox_scan",
+    {
+      target_inbox_id: inboxId,
+      requested_scope: "recent_demo",
+    },
+  );
+  if (scanRequestError) throw scanRequestError;
+  const scanResult = await runtime.processRequestedScans();
+  const discovered = scanResult.discovered;
   const inboundProcessed = await runtime.processOneInbound();
-  const ingestSummary = { discovered, inboundProcessed };
-  if (discovered !== 1 || !inboundProcessed) {
+  const ingestSummary = {
+    scanRequested: true,
+    scansProcessed: scanResult.scansProcessed,
+    discovered,
+    inboundProcessed,
+  };
+  if (
+    scanResult.scansProcessed !== 1 ||
+    discovered !== 1 ||
+    !inboundProcessed
+  ) {
     throw new Error(
       `Unexpected ingestion summary: ${JSON.stringify(ingestSummary)}`,
     );
   }
 
-  const duplicateDiscovery = await runtime.discoverInbound();
+  const { error: duplicateScanRequestError } = await userClient.rpc(
+    "request_inbox_scan",
+    {
+      target_inbox_id: inboxId,
+      requested_scope: "recent_demo",
+    },
+  );
+  if (duplicateScanRequestError) throw duplicateScanRequestError;
+  const duplicateScanResult = await runtime.processRequestedScans();
+  const duplicateDiscovery = duplicateScanResult.discovered;
   const duplicateProcessing = await runtime.processOneInbound();
   if (duplicateDiscovery !== 0 || duplicateProcessing) {
     throw new Error(
       `Idempotency failed: ${JSON.stringify({ duplicateDiscovery, duplicateProcessing })}`,
     );
+  }
+
+  const nonEnquiryMessageId = `<cargo-e2e-non-enquiry-${marker}@northstar.example>`;
+  await smtp.sendMail({
+    from: `Carrier Notifications <notifications-${marker}@carrier.example>`,
+    to: `Cargo E2E Desk <${inboxAddress}>`,
+    subject: "[Cargo Demo] Automated vessel schedule update",
+    messageId: nonEnquiryMessageId,
+    text: "Automated notification: vessel schedule updated. No reply is required.",
+  });
+  const nonEnquiryMail = await waitForMail(
+    inboxAddress,
+    `non-enquiry-${marker}`,
+  );
+  ignoredRawObjectPath = `${organizationId}/local_mailpit/${encodeURIComponent(nonEnquiryMail.providerMessageId)}.eml`;
+  const { error: nonEnquiryScanError } = await userClient.rpc(
+    "request_inbox_scan",
+    {
+      target_inbox_id: inboxId,
+      requested_scope: "recent_demo",
+    },
+  );
+  if (nonEnquiryScanError) throw nonEnquiryScanError;
+  const nonEnquiryScan = await runtime.processRequestedScans();
+  const nonEnquiryOutcome = await runtime.processOneInbound();
+  if (nonEnquiryScan.discovered !== 1 || nonEnquiryOutcome !== "ignored") {
+    throw new Error(
+      `Non-enquiry routing failed: ${JSON.stringify({ nonEnquiryScan, nonEnquiryOutcome })}`,
+    );
+  }
+  const [ignoredEvents, ignoredClassifications] = await Promise.all([
+    sqlClient<
+      Array<{ status: string; rawObjectPath: string | null }>
+    >`select status, raw_object_path as "rawObjectPath"
+      from public.inbound_events
+      where organization_id = ${organizationId}
+        and provider_event_id = ${nonEnquiryMail.providerMessageId}`,
+    sqlClient<Array<{ decision: string }>>`
+      select classification ->> 'decision' as decision
+      from public.email_classification_runs run
+      join public.inbound_events event on event.id = run.inbound_event_id
+      where event.organization_id = ${organizationId}
+        and event.provider_event_id = ${nonEnquiryMail.providerMessageId}
+    `,
+  ]);
+  if (
+    ignoredEvents[0]?.status !== "ignored" ||
+    ignoredEvents[0]?.rawObjectPath !== ignoredRawObjectPath ||
+    ignoredClassifications[0]?.decision !== "non_enquiry"
+  ) {
+    throw new Error("Ignored email classification provenance is incomplete");
+  }
+
+  const { data: outsiderScans, error: outsiderScanError } = await outsiderClient
+    .from("inbox_scan_requests")
+    .select("id")
+    .eq("inbox_connection_id", inboxId);
+  if (outsiderScanError) throw outsiderScanError;
+  if (outsiderScans?.length) {
+    throw new Error("Tenant isolation failed: outsider read inbox scans");
   }
 
   const { data: tickets, error: ticketError } = await userClient
@@ -229,6 +327,26 @@ North Star Imports`,
   const aiRun = aiRuns?.[0];
   if (!aiRun || aiRun.status !== "succeeded" || aiRun.provider === "fake") {
     throw new Error(`Real AI provenance is missing: ${JSON.stringify(aiRun)}`);
+  }
+  const { data: classificationRuns, error: classificationRunError } =
+    await userClient
+      .from("email_classification_runs")
+      .select(
+        "status, provider, model, prompt_version, schema_version, classification",
+      )
+      .eq("organization_id", organizationId);
+  if (classificationRunError) throw classificationRunError;
+  const quoteClassification = classificationRuns?.find(
+    (run) =>
+      (run.classification as { decision?: string })?.decision ===
+      "new_quote_enquiry",
+  );
+  if (
+    !quoteClassification ||
+    quoteClassification.status !== "succeeded" ||
+    quoteClassification.provider === "fake"
+  ) {
+    throw new Error("Real enquiry-classification provenance is missing");
   }
 
   const { data: outsiderTickets, error: outsiderTicketError } =
@@ -259,7 +377,7 @@ North Star Imports`,
   const { error: queueError } = await userClient.rpc("queue_ticket_reply", {
     target_ticket_id: ticket.id,
     reply_body:
-      "Hi Maya,\n\nWe are checking the live container milestone and will update you shortly.\n\nRegards,\nCargo Desk",
+      "Hi Maya,\n\nWe are preparing the freight quotation and will update you shortly.\n\nRegards,\nCargo Desk",
     reply_cc: [],
   });
   if (queueError) throw queueError;
@@ -354,6 +472,18 @@ North Star Imports`,
   if (workspaceAudit?.length !== 1) {
     throw new Error("Onboarding audit trail is missing workspace.created");
   }
+  const { data: scanAudits, error: scanAuditError } = await userClient
+    .from("audit_events")
+    .select("event_type")
+    .eq("organization_id", organizationId)
+    .in("event_type", ["inbox.scan_requested", "inbox.scan_completed"]);
+  if (scanAuditError) throw scanAuditError;
+  const scanAuditTypes = (scanAudits ?? []).map((row) => row.event_type);
+  for (const expected of ["inbox.scan_requested", "inbox.scan_completed"]) {
+    if (!scanAuditTypes.includes(expected)) {
+      throw new Error(`Inbox scan audit trail is missing ${expected}`);
+    }
+  }
   if (
     outboxResult.data?.length !== 1 ||
     outboxResult.data[0]?.status !== "sent"
@@ -378,21 +508,47 @@ North Star Imports`,
   await smtp.sendMail({
     from: `Maya Chen <${customerAddress}>`,
     to: `Cargo E2E Desk <${inboxAddress}>`,
-    subject: "AI failure retry acceptance probe",
+    subject: "[Cargo Demo] Quote request AI failure acceptance probe",
     messageId: failedInboundMessageId,
-    text: "Synthetic acceptance probe for an unavailable AI provider.",
+    text: "Please quote ocean freight from Singapore to Rotterdam. Synthetic acceptance probe for an unavailable extraction provider.",
   });
   const failedInboundMail = await waitForMail(
     inboxAddress,
     `ai-failure-${marker}`,
   );
   failedRawObjectPath = `${organizationId}/local_mailpit/${encodeURIComponent(failedInboundMail.providerMessageId)}.eml`;
-  const failureDiscovery = await runtime.discoverInbound();
+  const { error: failureScanRequestError } = await userClient.rpc(
+    "request_inbox_scan",
+    {
+      target_inbox_id: inboxId,
+      requested_scope: "recent_demo",
+    },
+  );
+  if (failureScanRequestError) throw failureScanRequestError;
+  const failureScanResult = await runtime.processRequestedScans();
+  const failureDiscovery = failureScanResult.discovered;
   if (failureDiscovery !== 1) {
     throw new Error(`Expected one AI failure probe, found ${failureDiscovery}`);
   }
 
   const expectedAiFailure = "Synthetic AI outage acceptance probe";
+  const acceptingTestClassifier = {
+    async classify() {
+      return {
+        classification: {
+          decision: "new_quote_enquiry" as const,
+          reason: "Synthetic extraction-failure test quote.",
+          evidence: ["Please quote"],
+          confidence: 0.99,
+        },
+        provider: "acceptance-fixture",
+        model: "deterministic-test-only",
+        promptVersion: "test-only",
+        schemaVersion: "test-only",
+        usage: { inputTokens: 0, outputTokens: 0 },
+      };
+    },
+  };
   const failingAiRuntime = new CargoWorkerRuntime(
     repository,
     () => provider,
@@ -401,6 +557,7 @@ North Star Imports`,
         throw new Error(expectedAiFailure);
       },
     },
+    acceptingTestClassifier,
     new SupabaseRawEmailStore(supabaseUrl, serviceRoleKey),
     `e2e-ai-failure-${marker}`,
   );
@@ -432,7 +589,9 @@ North Star Imports`,
     `;
     const failureRow = failureRows[0];
     if (!failureRow || failureRow.attempts !== attempt) {
-      throw new Error(`Inbound retry attempt ${attempt} was not recorded`);
+      throw new Error(
+        `Inbound retry attempt ${attempt} was not recorded: ${JSON.stringify(failureRow)}`,
+      );
     }
     if (failureRow.lastError !== expectedAiFailure) {
       throw new Error("Inbound retry did not retain the safe AI error");
@@ -462,7 +621,7 @@ North Star Imports`,
   const failingSmtpRuntime = new CargoWorkerRuntime(
     repository,
     () => ({
-      listMessages: (limit) => provider.listMessages(limit),
+      listMessages: (limit, options) => provider.listMessages(limit, options),
       fetchAndParse: (providerMessageId) =>
         provider.fetchAndParse(providerMessageId),
       async sendReply() {
@@ -470,6 +629,7 @@ North Star Imports`,
       },
     }),
     createCargoExtractorFromEnv(),
+    createEnquiryClassifierFromEnv(),
     new SupabaseRawEmailStore(supabaseUrl, serviceRoleKey),
     `e2e-smtp-failure-${marker}`,
   );
@@ -535,8 +695,9 @@ North Star Imports`,
           ...ingestSummary,
           duplicateDiscovery,
           duplicateProcessing,
+          nonEnquiryIgnored: true,
         },
-        ai: aiRun,
+        ai: { extraction: aiRun, classification: quoteClassification },
         ticket: {
           number: ticket.number,
           category: ticket.category,
@@ -556,7 +717,7 @@ North Star Imports`,
         rawMimeStored: true,
         rawMimeTenantPrivate: true,
         ticketStatusHistory: statuses,
-        auditTrail: ["workspace.created", ...auditTypes],
+        auditTrail: ["workspace.created", ...scanAuditTypes, ...auditTypes],
         failureHandling: {
           aiInboundRetries: inboundRetryStates,
           aiInboundTerminalStatus: "dead_letter",
@@ -571,6 +732,9 @@ North Star Imports`,
 } finally {
   if (rawObjectPath) {
     await admin.storage.from("cargo-email-raw").remove([rawObjectPath]);
+  }
+  if (ignoredRawObjectPath) {
+    await admin.storage.from("cargo-email-raw").remove([ignoredRawObjectPath]);
   }
   if (failedRawObjectPath) {
     await admin.storage.from("cargo-email-raw").remove([failedRawObjectPath]);

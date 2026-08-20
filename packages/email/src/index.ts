@@ -34,8 +34,15 @@ export interface SentEmail {
   sentAt: Date;
 }
 
+export interface MailboxListOptions {
+  query?: string;
+}
+
 export interface EmailProvider {
-  listMessages(limit?: number): Promise<MailboxMessageSummary[]>;
+  listMessages(
+    limit?: number,
+    options?: MailboxListOptions,
+  ): Promise<MailboxMessageSummary[]>;
   fetchAndParse(providerMessageId: string): Promise<ParsedInboundEmail>;
   sendReply(input: SendReplyInput): Promise<SentEmail>;
 }
@@ -198,7 +205,10 @@ export class MailpitEmailProvider implements EmailProvider {
       });
   }
 
-  async listMessages(limit = 100): Promise<MailboxMessageSummary[]> {
+  async listMessages(
+    limit = 100,
+    _options: MailboxListOptions = {},
+  ): Promise<MailboxMessageSummary[]> {
     const response = await this.#fetcher(
       `${this.#apiUrl}/api/v1/messages?start=0&limit=${limit}`,
     );
@@ -354,11 +364,14 @@ export class GmailEmailProvider implements EmailProvider {
     });
   }
 
-  async listMessages(limit = 100): Promise<MailboxMessageSummary[]> {
+  async listMessages(
+    limit = 100,
+    options: MailboxListOptions = {},
+  ): Promise<MailboxMessageSummary[]> {
     const query = new URLSearchParams({
       maxResults: String(Math.min(Math.max(limit, 1), 500)),
       labelIds: "INBOX",
-      q: this.#query,
+      q: options.query?.trim() || this.#query,
     });
     const response = await this.#request(
       `/users/me/messages?${query.toString()}`,

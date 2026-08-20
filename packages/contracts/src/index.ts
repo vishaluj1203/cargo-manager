@@ -45,6 +45,30 @@ export const cargoExtractionSchema = z.object({
   confidence: z.number().min(0).max(1),
 });
 
+export const enquiryClassificationSchema = z.object({
+  decision: z.enum([
+    "new_quote_enquiry",
+    "existing_quote_follow_up",
+    "non_enquiry",
+    "uncertain",
+  ]),
+  reason: z.string().min(1).max(500),
+  evidence: z.array(z.string().min(1).max(300)).max(8),
+  confidence: z.number().min(0).max(1),
+});
+
+export const enquiryDetectionPolicySchema = z.object({
+  minimumConfidence: z.number().min(0.5).max(0.99),
+  acceptExistingQuoteFollowUps: z.boolean(),
+  uncertainAction: z.enum(["review", "ignore"]),
+});
+
+export const defaultEnquiryDetectionPolicy = {
+  minimumConfidence: 0.75,
+  acceptExistingQuoteFollowUps: true,
+  uncertainAction: "review",
+} as const satisfies z.infer<typeof enquiryDetectionPolicySchema>;
+
 export const normalizedEmailSchema = z.object({
   provider: z.enum(["local_mailpit", "gmail"]),
   providerMessageId: z.string().min(1),
@@ -88,6 +112,10 @@ export const replyDraftSchema = z.object({
 });
 
 export type CargoExtraction = z.infer<typeof cargoExtractionSchema>;
+export type EnquiryClassification = z.infer<typeof enquiryClassificationSchema>;
+export type EnquiryDetectionPolicy = z.infer<
+  typeof enquiryDetectionPolicySchema
+>;
 export type NormalizedEmail = z.infer<typeof normalizedEmailSchema>;
 export type TicketStatus = z.infer<typeof ticketStatusSchema>;
 export type TicketPriority = z.infer<typeof ticketPrioritySchema>;

@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { cargoExtractionSchema, normalizedEmailSchema } from "./index";
+import {
+  cargoExtractionSchema,
+  enquiryClassificationSchema,
+  enquiryDetectionPolicySchema,
+  normalizedEmailSchema,
+} from "./index";
 
 describe("shared contracts", () => {
   it("rejects an invented confidence outside the supported range", () => {
@@ -38,5 +43,23 @@ describe("shared contracts", () => {
       rawObjectKey: null,
     });
     expect(result.success).toBe(true);
+  });
+
+  it("validates enquiry decisions and configurable confidence policy", () => {
+    expect(
+      enquiryClassificationSchema.safeParse({
+        decision: "new_quote_enquiry",
+        reason: "Customer asks for a rate.",
+        evidence: ["Please quote"],
+        confidence: 0.96,
+      }).success,
+    ).toBe(true);
+    expect(
+      enquiryDetectionPolicySchema.safeParse({
+        minimumConfidence: 1.5,
+        acceptExistingQuoteFollowUps: true,
+        uncertainAction: "review",
+      }).success,
+    ).toBe(false);
   });
 });

@@ -26,6 +26,7 @@
     "db:push": "node scripts/supabase-cloud.mjs push",
     "db:push:dry-run": "node scripts/supabase-cloud.mjs dry-run",
     "deploy:gcp": "node deploy/gcp/deploy.mjs",
+    "deploy:gcp:worker": "node deploy/gcp/deploy-worker.mjs",
     "deploy:gcp:web": "node deploy/gcp/deploy-web.mjs"
   },
   "devDependencies": {

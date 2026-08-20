@@ -114,7 +114,11 @@ describe("email adapter", () => {
       fetcher,
     });
 
-    await expect(provider.listMessages(20)).resolves.toMatchObject([
+    await expect(
+      provider.listMessages(20, {
+        query: 'subject:"[Cargo Demo]"',
+      }),
+    ).resolves.toMatchObject([
       {
         providerMessageId: "gmail-1",
         recipients: ["cargo@skyvalence.com"],
@@ -127,6 +131,14 @@ describe("email adapter", () => {
         providerThreadId: "t-1",
       },
     });
+    const listUrl = String(
+      fetcher.mock.calls.find(([input]) =>
+        String(input).includes("/users/me/messages?"),
+      )?.[0],
+    );
+    expect(new URL(listUrl).searchParams.get("q")).toBe(
+      'subject:"[Cargo Demo]"',
+    );
   });
 
   it("sends Gmail replies as base64url MIME in the original thread", async () => {

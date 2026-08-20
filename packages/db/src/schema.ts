@@ -31,6 +31,17 @@ export const inboxProviderEnum = pgEnum("inbox_provider", [
   "gmail",
   "microsoft",
 ]);
+export const inboxScanScopeEnum = pgEnum("inbox_scan_scope", [
+  "recent_demo",
+  "all_demo",
+]);
+export const inboxScanStatusEnum = pgEnum("inbox_scan_status", [
+  "pending",
+  "processing",
+  "retrying",
+  "completed",
+  "failed",
+]);
 export const connectionStatusEnum = pgEnum("connection_status", [
   "pending",
   "connected",
@@ -41,6 +52,7 @@ export const inboundStatusEnum = pgEnum("inbound_status", [
   "pending",
   "processing",
   "processed",
+  "ignored",
   "failed",
   "dead_letter",
 ]);
@@ -198,6 +210,55 @@ export const inboxCredentials = pgTable("inbox_credentials", {
   ...timestamps,
 });
 
+export const inboxScanRequests = pgTable(
+  "inbox_scan_requests",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    inboxConnectionId: uuid("inbox_connection_id")
+      .notNull()
+      .references(() => inboxConnections.id, { onDelete: "cascade" }),
+    requestedBy: uuid("requested_by")
+      .notNull()
+      .references(() => profiles.id, { onDelete: "restrict" }),
+    scope: inboxScanScopeEnum("scope").notNull(),
+    gmailQuery: text("gmail_query").notNull(),
+    status: inboxScanStatusEnum("status").default("pending").notNull(),
+    attempts: integer("attempts").default(0).notNull(),
+    discoveredCount: integer("discovered_count").default(0).notNull(),
+    lastError: text("last_error"),
+    availableAt: timestamp("available_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    lockedAt: timestamp("locked_at", { withTimezone: true }),
+    lockedBy: text("locked_by"),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("inbox_scan_requests_queue_idx").on(
+      table.status,
+      table.availableAt,
+      table.createdAt,
+    ),
+    index("inbox_scan_requests_inbox_idx").on(
+      table.inboxConnectionId,
+      table.createdAt,
+    ),
+    uniqueIndex("inbox_scan_requests_one_active_idx")
+      .on(table.inboxConnectionId)
+      .where(sql`${table.status} in ('pending', 'processing', 'retrying')`),
+  ],
+);
+
 export const inboundEvents = pgTable(
   "inbound_events",
   {
@@ -213,6 +274,7 @@ export const inboundEvents = pgTable(
       .$type<Record<string, unknown>>()
       .default({})
       .notNull(),
+    rawObjectPath: text("raw_object_path"),
     status: inboundStatusEnum("status").default("pending").notNull(),
     attempts: integer("attempts").default(0).notNull(),
     lastError: text("last_error"),
@@ -457,6 +519,37 @@ export const aiRuns = pgTable(
       .notNull(),
   },
   (table) => [index("ai_runs_email_idx").on(table.emailId, table.createdAt)],
+);
+
+export const emailClassificationRuns = pgTable(
+  "email_classification_runs",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    inboundEventId: uuid("inbound_event_id")
+      .notNull()
+      .references(() => inboundEvents.id, { onDelete: "cascade" }),
+    status: aiRunStatusEnum("status").default("succeeded").notNull(),
+    provider: text("provider").notNull(),
+    model: text("model").notNull(),
+    promptVersion: text("prompt_version").notNull(),
+    schemaVersion: text("schema_version").notNull(),
+    inputTokens: integer("input_tokens"),
+    outputTokens: integer("output_tokens"),
+    classification: jsonb("classification")
+      .$type<Record<string, unknown>>()
+      .notNull(),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("email_classification_runs_event_idx").on(table.inboundEventId),
+    index("email_classification_runs_org_idx").on(
+      table.organizationId,
+      table.createdAt,
+    ),
+  ],
 );
 
 export const outboxJobs = pgTable(

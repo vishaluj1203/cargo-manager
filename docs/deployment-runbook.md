@@ -6,14 +6,16 @@ Cloud Run uses London (`europe-west2`). The current Supabase project is in AWS I
 
 ## Current deployment
 
-The first London deployment completed on 2026-08-16:
+The London deployment was last accepted on 2026-08-21:
 
 - Web: `https://cargo-manager-web-cjbvmtbt4a-nw.a.run.app`
 - Worker: private Cloud Run service `cargo-manager-worker`
-- Trigger: OIDC Cloud Scheduler job `cargo-manager-worker-minute` (currently paused while the AI credential is replaced)
+- Trigger: enabled OIDC Cloud Scheduler job `cargo-manager-worker-minute`
 - Region: GCP London (`europe-west2`)
+- Web revision: `cargo-manager-web-00007-dft`
+- Worker revision: `cargo-manager-worker-00008-nsc` (private)
 
-The web login returns 200, application routes enforce authentication, anonymous worker requests return 403, and Gmail OAuth is connected for `info@skyvalence.com`. The first poll safely exposed an exhausted Gemini API quota; 18 historical events were quarantined without creating tickets, and scheduled polling was paused. A synthetic Gmail round trip remains before client demonstration.
+The web service is live, application routes redirect unauthenticated users to login, anonymous worker requests are forbidden, and Gmail OAuth is connected for `info@skyvalence.com`. The original 18 historical events remain quarantined and have never created tickets. KAN-5 production Gmail ingestion/threading and KAN-6 quote-enquiry classification have passed with real Groq inference.
 
 The demo worker deliberately uses `GMAIL_INITIAL_QUERY='newer_than:7d subject:"[Cargo Demo]"'`. Keep that boundary in place while using a company inbox so unrelated historical or live mail is not imported.
 
@@ -72,7 +74,7 @@ pnpm build
 pnpm e2e:smoke
 ```
 
-The database must report 16/16 tables with RLS and migrations 0000–0005.
+The database must report 18/18 tables with RLS, 22 policies, all required RPCs and migrations 0000–0007.
 
 ## 3. Deploy
 
@@ -103,6 +105,16 @@ In Supabase **Authentication → URL Configuration**:
 5. Wait up to two scheduler cycles and verify one ticket, AI fields, raw MIME and audit records.
 6. Reply from the ticket and verify the response reaches the sender in the original Gmail thread.
 7. Run the worker endpoint again through Scheduler and verify no duplicate ticket or email appears.
+
+KAN-6 acceptance additionally requires:
+
+1. Send one synthetic freight RFQ and one synthetic non-enquiry, both with `[Cargo Demo]` subjects.
+2. Verify `email_classification_runs` records real provider/model, prompt/schema versions, nonzero token usage, decision and confidence.
+3. Verify the RFQ creates exactly one ticket and the non-enquiry becomes an `ignored` inbound event with no ticket.
+4. Verify both raw MIME objects exist in the private bucket and the non-enquiry audit event exists.
+5. Rerun Scheduler and verify classification/event/ticket counts do not increase.
+
+Observed KAN-6 production evidence on 2026-08-21: Groq `openai/gpt-oss-20b` classified one RFQ as `new_quote_enquiry` (0.99), creating `CAR-000007`, and one automated notice as `non_enquiry` (1.0), creating an audited `ignored` event and no ticket. Both raw MIME objects were private; duplicate rerun counts remained two provider events, two classifications and one ticket. Final worker revision `cargo-manager-worker-00008-nsc` restricts the global production queue to Gmail inboxes, remains private, and completed authenticated Scheduler runs with HTTP 200 and zero failures.
 
 Use synthetic content until the AI provider account is approved for real customer data. Confirm `pnpm ai:smoke` succeeds with the production AI credential before resuming `cargo-manager-worker-minute`.
 

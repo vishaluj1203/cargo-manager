@@ -2,11 +2,14 @@ import { sqlClient } from "@cargo/db";
 
 import { safeErrorMessage } from "./runtime.js";
 import type {
+  AutomaticInbox,
   ClaimedInboundEvent,
+  ClaimedInboxScan,
   ClaimedOutboxDelivery,
   ConnectedInbox,
   PersistInboundInput,
   PersistInboundResult,
+  PersistIgnoredInboundInput,
   WorkerRepository,
 } from "./types.js";
 
@@ -33,22 +36,144 @@ function retryDelaySeconds(attempts: number): number {
 export class PostgresWorkerRepository implements WorkerRepository {
   constructor(private readonly organizationId: string | null = null) {}
 
-  async listConnectedInboxes(): Promise<ConnectedInbox[]> {
+  async listAutomaticInboxes(): Promise<AutomaticInbox[]> {
     const organizationId = this.organizationId;
-    return sqlClient<ConnectedInbox[]>`
-      select id,
-             organization_id as "organizationId",
-             provider,
-             lower(address) as address,
+    return sqlClient<AutomaticInbox[]>`
+      select inbox.id,
+             inbox.organization_id as "organizationId",
+             inbox.provider,
+             lower(inbox.address) as address,
              credentials.encrypted_refresh_token as "encryptedRefreshToken",
-             coalesce(credentials.granted_scopes, array[]::text[]) as "grantedScopes"
+             coalesce(credentials.granted_scopes, array[]::text[]) as "grantedScopes",
+             inbox.last_synced_at as "lastSyncedAt"
       from public.inbox_connections inbox
-      left join public.inbox_credentials credentials
+      join public.inbox_credentials credentials
         on credentials.inbox_connection_id = inbox.id
       where inbox.status = 'connected'
-        and inbox.provider in ('local_mailpit', 'gmail')
+        and inbox.provider = 'gmail'
+        and inbox.last_synced_at is not null
         and (${organizationId}::uuid is null or inbox.organization_id = ${organizationId}::uuid)
       order by inbox.created_at
+    `;
+  }
+
+  async completeAutomaticScan(
+    inbox: AutomaticInbox,
+    scannedAt: Date,
+  ): Promise<void> {
+    await sqlClient`
+      update public.inbox_connections
+      set last_synced_at = ${scannedAt.toISOString()}, updated_at = now()
+      where id = ${inbox.id}
+        and last_synced_at <= ${scannedAt.toISOString()}
+    `;
+  }
+
+  async claimInboxScan(workerId: string): Promise<ClaimedInboxScan | null> {
+    const organizationId = this.organizationId;
+    const rows = await sqlClient<ClaimedInboxScan[]>`
+      with candidate as (
+        select scan.id
+        from public.inbox_scan_requests scan
+        where scan.attempts < 3
+          and scan.available_at <= now()
+          and (${organizationId}::uuid is null or scan.organization_id = ${organizationId}::uuid)
+          and (
+            ${organizationId}::uuid is not null
+            or exists (
+              select 1 from public.inbox_connections candidate_inbox
+              where candidate_inbox.id = scan.inbox_connection_id
+                and candidate_inbox.provider = 'gmail'
+            )
+          )
+          and (
+            scan.status in ('pending', 'retrying')
+            or (
+              scan.status = 'processing'
+              and scan.locked_at < now() - interval '10 minutes'
+            )
+          )
+        order by scan.created_at
+        for update skip locked
+        limit 1
+      )
+      update public.inbox_scan_requests scan
+      set status = 'processing',
+          attempts = scan.attempts + 1,
+          started_at = coalesce(scan.started_at, now()),
+          locked_at = now(),
+          locked_by = ${workerId},
+          last_error = null,
+          updated_at = now()
+      from candidate,
+           public.inbox_connections inbox
+           left join public.inbox_credentials credentials
+             on credentials.inbox_connection_id = inbox.id
+      where scan.id = candidate.id
+        and inbox.id = scan.inbox_connection_id
+        and inbox.status = 'connected'
+      returning scan.id as "scanId",
+                scan.organization_id as "organizationId",
+                scan.inbox_connection_id as "id",
+                inbox.provider,
+                lower(inbox.address) as address,
+                credentials.encrypted_refresh_token as "encryptedRefreshToken",
+                coalesce(credentials.granted_scopes, array[]::text[]) as "grantedScopes",
+                scan.scope,
+                scan.gmail_query as query,
+                scan.attempts
+    `;
+    return rows[0] ?? null;
+  }
+
+  async completeInboxScan(
+    scan: ClaimedInboxScan,
+    discovered: number,
+  ): Promise<void> {
+    await sqlClient.begin(async (transaction) => {
+      await transaction`
+        update public.inbox_scan_requests
+        set status = 'completed',
+            discovered_count = ${discovered},
+            completed_at = now(),
+            locked_at = null,
+            locked_by = null,
+            updated_at = now()
+        where id = ${scan.scanId}
+      `;
+      await transaction`
+        update public.inbox_connections
+        set last_synced_at = now(), updated_at = now()
+        where id = ${scan.id}
+      `;
+      await transaction`
+        insert into public.audit_events (
+          organization_id, actor_type, actor_id, event_type, data
+        ) values (
+          ${scan.organizationId}, 'system', ${scan.scanId},
+          'inbox.scan_completed',
+          ${JSON.stringify({
+            inboxId: scan.id,
+            scope: scan.scope,
+            discovered,
+          })}::jsonb
+        )
+      `;
+    });
+  }
+
+  async failInboxScan(scan: ClaimedInboxScan, error: Error): Promise<void> {
+    const terminal = scan.attempts >= 3;
+    await sqlClient`
+      update public.inbox_scan_requests
+      set status = ${terminal ? "failed" : "retrying"},
+          last_error = ${safeErrorMessage(error)},
+          available_at = now() + (${retryDelaySeconds(scan.attempts)} * interval '1 second'),
+          completed_at = case when ${terminal} then now() else null end,
+          locked_at = null,
+          locked_by = null,
+          updated_at = now()
+      where id = ${scan.scanId}
     `;
   }
 
@@ -78,6 +203,14 @@ export class PostgresWorkerRepository implements WorkerRepository {
         from public.inbound_events
         where attempts < 5
           and (${organizationId}::uuid is null or organization_id = ${organizationId}::uuid)
+          and (
+            ${organizationId}::uuid is not null
+            or exists (
+              select 1 from public.inbox_connections candidate_inbox
+              where candidate_inbox.id = inbound_events.inbox_connection_id
+                and candidate_inbox.provider = 'gmail'
+            )
+          )
           and available_at <= now()
           and (
             status in ('pending', 'failed')
@@ -106,6 +239,7 @@ export class PostgresWorkerRepository implements WorkerRepository {
                 lower(inbox.address) as address,
                 credentials.encrypted_refresh_token as "encryptedRefreshToken",
                 coalesce(credentials.granted_scopes, array[]::text[]) as "grantedScopes",
+                inbox.config -> 'enquiryDetection' as "enquiryPolicy",
                 event.provider_event_id as "providerMessageId",
                 event.attempts
     `;
@@ -115,7 +249,14 @@ export class PostgresWorkerRepository implements WorkerRepository {
   async persistInbound(
     input: PersistInboundInput,
   ): Promise<PersistInboundResult> {
-    const { event, parsed, extraction, rawObjectPath } = input;
+    const {
+      event,
+      parsed,
+      classification,
+      extraction,
+      rawObjectPath,
+      forceReview,
+    } = input;
     const email = parsed.email;
     return sqlClient.begin(async (transaction) => {
       const duplicate = await transaction<
@@ -192,6 +333,21 @@ export class PostgresWorkerRepository implements WorkerRepository {
       const emailId = insertedEmail[0]?.id;
       if (!emailId) throw new Error("Unable to persist inbound email");
 
+      await transaction`
+        insert into public.email_classification_runs (
+          organization_id, inbound_event_id, status, provider, model,
+          prompt_version, schema_version, input_tokens, output_tokens,
+          classification
+        ) values (
+          ${event.organizationId}, ${event.id}, 'succeeded',
+          ${classification.provider}, ${classification.model},
+          ${classification.promptVersion}, ${classification.schemaVersion},
+          ${classification.usage.inputTokens}, ${classification.usage.outputTokens},
+          ${JSON.stringify(classification.classification)}::jsonb
+        )
+        on conflict (inbound_event_id) do nothing
+      `;
+
       const contacts = await transaction<IdRow[]>`
         insert into public.contacts (organization_id, email, name, company)
         values (
@@ -255,7 +411,9 @@ export class PostgresWorkerRepository implements WorkerRepository {
         }
       } else {
         const triageStatus =
-          extraction.extraction.confidence < 0.7 ? "needs_verification" : "new";
+          forceReview || extraction.extraction.confidence < 0.7
+            ? "needs_verification"
+            : "new";
         const createdTicket = await transaction<
           { id: string; number: string }[]
         >`
@@ -302,16 +460,63 @@ export class PostgresWorkerRepository implements WorkerRepository {
             emailId,
             provider: event.provider,
             providerMessageId: event.providerMessageId,
+            classificationDecision: classification.classification.decision,
+            classificationConfidence: classification.classification.confidence,
             aiConfidence: extraction.extraction.confidence,
           })}::jsonb
         )
       `;
       await transaction`
         update public.inbound_events
-        set status = 'processed', processed_at = now(), locked_at = null, locked_by = null
+        set status = 'processed', processed_at = now(),
+            raw_object_path = ${rawObjectPath},
+            locked_at = null, locked_by = null
         where id = ${event.id}
       `;
       return { ticketId, ticketNumber, duplicate: false };
+    });
+  }
+
+  async persistIgnoredInbound(
+    input: PersistIgnoredInboundInput,
+  ): Promise<void> {
+    const { event, classification, rawObjectPath } = input;
+    await sqlClient.begin(async (transaction) => {
+      await transaction`
+        insert into public.email_classification_runs (
+          organization_id, inbound_event_id, status, provider, model,
+          prompt_version, schema_version, input_tokens, output_tokens,
+          classification
+        ) values (
+          ${event.organizationId}, ${event.id}, 'succeeded',
+          ${classification.provider}, ${classification.model},
+          ${classification.promptVersion}, ${classification.schemaVersion},
+          ${classification.usage.inputTokens}, ${classification.usage.outputTokens},
+          ${JSON.stringify(classification.classification)}::jsonb
+        )
+        on conflict (inbound_event_id) do nothing
+      `;
+      await transaction`
+        insert into public.audit_events (
+          organization_id, actor_type, actor_id, event_type, data
+        ) values (
+          ${event.organizationId}, 'system', ${event.id},
+          'email.classified_non_enquiry',
+          ${JSON.stringify({
+            inboxConnectionId: event.inboxConnectionId,
+            provider: event.provider,
+            decision: classification.classification.decision,
+            confidence: classification.classification.confidence,
+          })}::jsonb
+        )
+      `;
+      await transaction`
+        update public.inbound_events
+        set status = 'ignored', processed_at = now(),
+            raw_object_path = ${rawObjectPath},
+            locked_at = null, locked_by = null
+        where id = ${event.id}
+      `;
     });
   }
 
@@ -335,6 +540,14 @@ export class PostgresWorkerRepository implements WorkerRepository {
         select id from public.outbox_jobs
         where attempts < 5 and available_at <= now()
           and (${organizationId}::uuid is null or organization_id = ${organizationId}::uuid)
+          and (
+            ${organizationId}::uuid is not null
+            or exists (
+              select 1 from public.inbox_connections candidate_inbox
+              where candidate_inbox.id = outbox_jobs.inbox_connection_id
+                and candidate_inbox.provider = 'gmail'
+            )
+          )
           and (
             status in ('pending', 'failed')
             or (status = 'processing' and locked_at < now() - interval '10 minutes')

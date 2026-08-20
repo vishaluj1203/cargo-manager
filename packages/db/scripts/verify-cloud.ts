@@ -25,11 +25,13 @@ const expectedTables = [
   "ai_runs",
   "audit_events",
   "contacts",
+  "email_classification_runs",
   "email_threads",
   "emails",
   "inbound_events",
   "inbox_connections",
   "inbox_credentials",
+  "inbox_scan_requests",
   "mailbox_cursors",
   "organization_members",
   "organizations",
@@ -63,6 +65,8 @@ try {
         "queue_ticket_reply",
         "connect_gmail_inbox",
         "disconnect_gmail_inbox",
+        "request_inbox_scan",
+        "update_inbox_enquiry_policy",
       ]})
     order by proname
   `;
@@ -88,6 +92,8 @@ try {
     "create_workspace",
     "create_workspace_v2",
     "disconnect_gmail_inbox",
+    "request_inbox_scan",
+    "update_inbox_enquiry_policy",
     "queue_ticket_reply",
   ];
   const missingFunctions = expectedFunctions.filter(

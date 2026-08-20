@@ -2,7 +2,7 @@
 
 Status: active source of truth
 
-Last updated: 2026-08-20
+Last updated: 2026-08-21
 
 Product owner: Skyvalence
 
@@ -10,18 +10,19 @@ Repository: `vishaluj1203/cargo-manager`
 
 ## 1. Product outcome
 
-Cargo Manager turns operational cargo email into trackable work for freight forwarders, brokers and operators.
+Cargo Manager turns freight quotation email into trackable commercial work for freight forwarders, brokers and operators.
 
 The minimum credible workflow is:
 
 1. A company user creates an account and cargo workspace.
 2. The company connects or forwards an operations inbox.
 3. An inbound MIME email is stored and normalized.
-4. An open-weight hosted model extracts cargo facts into a strict schema.
-5. Cargo Manager creates or updates one threaded ticket.
-6. An operator reviews the AI result, changes workflow status and replies from the ticket.
-7. A durable outbox sends the email with RFC thread headers and records the outcome.
-8. Every automated and human action is available in an audit trail.
+4. An open-weight hosted model classifies whether the message is a new quote enquiry, an existing-quote follow-up, a non-enquiry or uncertain.
+5. Accepted/reviewable enquiries are extracted into a strict cargo schema; confident non-enquiries are audited and ignored without creating tickets.
+6. Cargo Manager creates or updates one threaded ticket.
+7. An operator reviews the AI result, changes workflow status and replies from the ticket.
+8. A durable outbox sends the email with RFC thread headers and records the outcome.
+9. Every automated and human action is available in an audit trail.
 
 This is an email-native operational system. It is not a replacement transport-management system in the first release.
 
@@ -29,17 +30,17 @@ This is an email-native operational system. It is not a replacement transport-ma
 
 Use one TypeScript monorepo with independently deployable web and worker processes.
 
-| Concern            | Choice                                                           | Why                                                                              |
-| ------------------ | ---------------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| Web product        | Next.js App Router on GCP Cloud Run                              | One commercial-safe, scale-to-zero deployment account for the startup            |
-| Authentication     | Hosted Supabase Auth                                             | Account lifecycle and secure SSR sessions without operating an identity platform |
-| Transactional data | Hosted Supabase PostgreSQL                                       | Managed Postgres, row-level security and a usable free startup tier              |
-| Raw email storage  | Private Supabase Storage bucket                                  | Keeps original MIME available for audit and reprocessing                         |
-| Background work    | Local worker for acceptance; GCP Cloud Run worker for production | Email and AI work must not run inside short-lived web requests                   |
-| Local email        | Mailpit                                                          | Real SMTP/MIME/thread testing without sending external mail                      |
-| Production inbox   | Google Workspace Gmail API                                       | Per-user OAuth, scheduled polling, raw MIME ingestion and threaded mailbox reply |
-| AI extraction      | Groq-hosted `openai/gpt-oss-20b` for local acceptance            | Compact open-weight MoE, strict JSON Schema output and no local model runtime    |
-| Observability      | Structured GCP logs first; Sentry and PostHog next               | Useful deployment logs now, richer error and product analytics after the demo    |
+| Concern                          | Choice                                                           | Why                                                                                                   |
+| -------------------------------- | ---------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| Web product                      | Next.js App Router on GCP Cloud Run                              | One commercial-safe, scale-to-zero deployment account for the startup                                 |
+| Authentication                   | Hosted Supabase Auth                                             | Account lifecycle and secure SSR sessions without operating an identity platform                      |
+| Transactional data               | Hosted Supabase PostgreSQL                                       | Managed Postgres, row-level security and a usable free startup tier                                   |
+| Raw email storage                | Private Supabase Storage bucket                                  | Keeps original MIME available for audit and reprocessing                                              |
+| Background work                  | Local worker for acceptance; GCP Cloud Run worker for production | Email and AI work must not run inside short-lived web requests                                        |
+| Local email                      | Mailpit                                                          | Real SMTP/MIME/thread testing without sending external mail                                           |
+| Production inbox                 | Google Workspace Gmail API                                       | Per-user OAuth, scheduled polling, raw MIME ingestion and threaded mailbox reply                      |
+| AI classification and extraction | Groq-hosted `openai/gpt-oss-20b`                                 | Compact open-weight MoE, strict JSON Schema output, fail-closed validation and no local model runtime |
+| Observability                    | Structured GCP logs first; Sentry and PostHog next               | Useful deployment logs now, richer error and product analytics after the demo                         |
 
 Do not split frontend and backend into separate repositories now. Shared contracts, migrations and one atomic history are more valuable at this stage. The deployment boundary already exists at `apps/web` and `services/worker`.
 
@@ -51,7 +52,7 @@ services/worker        Inbox discovery, event processing and reply delivery
 packages/contracts     Shared Zod request, email and AI schemas
 packages/db            Drizzle schema and PostgreSQL connection
 packages/email         Mailpit provider, MIME parser and SMTP reply adapter
-packages/ai            Provider-neutral cargo extractor with Groq and Google adapters
+packages/ai            Provider-neutral enquiry classifier and cargo extractor with Groq and Google adapters
 packages/security      AES-256-GCM server-side credential encryption
 supabase/migrations    Immutable hosted database evolution
 docs                   Architecture and operator runbooks
@@ -76,7 +77,9 @@ Gmail API / local Mailpit
       ▼
 Worker ─────► private raw-email bucket
   │
-  ├────► Hosted open-weight AI with schema-constrained extraction
+  ├────► Hosted open-weight AI: schema-constrained enquiry classification
+  │          ├─ quote/review ─► schema-constrained extraction
+  │          └─ non-enquiry ─► audited ignored event (no ticket)
   │
   └────► Supabase PostgreSQL
              │
@@ -118,17 +121,26 @@ Before onboarding real client data, add retention controls, account deletion/exp
 5. A worker atomically claims one event with a lease and `FOR UPDATE SKIP LOCKED`.
 6. Provider returns raw MIME; `mailparser` normalizes headers, addresses, text, HTML and attachments.
 7. Raw MIME is uploaded to the private bucket using a deterministic path.
-8. AI receives the latest message, bounded prior summary and bounded text attachments. During the company-inbox demo, Gmail discovery is additionally restricted to recent subjects containing `[Cargo Demo]`.
-9. The provider is forced into schema-constrained output; Cargo Manager validates the result with Zod and retries one malformed model response.
-10. One database transaction creates the email, contact, AI run, thread, ticket link, status history and audit event.
-11. Low-confidence extraction creates a `needs_verification` ticket. Otherwise the ticket starts as `new`.
-12. Duplicate events return the existing ticket and make no duplicate records.
+8. The classifier receives the latest message, bounded prior summary and bounded text attachments. During the company-inbox demo, Gmail discovery is additionally restricted to recent subjects containing `[Cargo Demo]`.
+9. The provider is forced into schema-constrained output; Cargo Manager validates the decision with Zod and retries one malformed model response.
+10. Per-inbox policy applies a configurable confidence threshold, existing-quote-follow-up switch and uncertain-message action.
+11. A confident `non_enquiry` is recorded in `email_classification_runs`, keeps its raw MIME private, becomes an `ignored` event and creates no ticket.
+12. Accepted quote enquiries proceed to schema-constrained cargo extraction. Uncertain/low-confidence mail configured for review creates a `needs_verification` ticket.
+13. One database transaction creates the email, contact, AI runs, thread, ticket link, status history and audit event.
+14. Duplicate events return the existing result and make no duplicate records.
 
 Failures retry with exponential delay. Leases older than ten minutes can be reclaimed. Inbound events stop after five attempts in `dead_letter`.
 
 ## 7. AI contract and context policy
 
-AI extracts meaning; application regexes do not extract cargo fields.
+AI classifies and extracts meaning; application regexes do not determine enquiry intent or extract cargo fields.
+
+Classification output:
+
+- decision: `new_quote_enquiry`, `existing_quote_follow_up`, `non_enquiry` or `uncertain`
+- concise reason and bounded evidence fragments
+- confidence from 0 to 1
+- provider, model, prompt/schema versions and token usage
 
 Current output:
 
@@ -167,7 +179,7 @@ The current schema includes:
 
 - Identity: `profiles`, `organizations`, `organization_members`
 - Inbox: `inbox_connections`, `inbox_credentials`, `mailbox_cursors`
-- Durable intake: `inbound_events`
+- Durable intake: `inbound_events`, `email_classification_runs`
 - Conversation: `email_threads`, `emails`
 - Cargo work: `contacts`, `tickets`, `ticket_emails`, `ticket_status_history`
 - Automation: `ai_runs`, `outbox_jobs`
@@ -187,7 +199,7 @@ Status: complete.
 - PostgreSQL tables, RLS, policies, private bucket and command functions
 - Live schema verification script
 
-Exit evidence: 16 application tables, RLS on all 16, 20 policies, private raw bucket and migrations 0000–0005.
+Exit evidence after KAN-6: 18 application tables, RLS on all 18, 22 policies, private raw bucket and migrations 0000–0007.
 
 ### Wave 1 — local product acceptance
 
@@ -235,7 +247,7 @@ Exit criterion: a repeatable 10-minute demo with no terminal intervention after 
 
 ### Wave 3 — first real inbox
 
-Status: implementation complete for the polling demo; live OAuth acceptance is blocked on owner configuration.
+Status: production polling and Gmail round-trip accepted on 2026-08-21.
 
 - Per-user Google OAuth with offline access and CSRF-bound callback state
 - Gmail readonly/send scopes and Workspace test-user strategy
@@ -249,7 +261,7 @@ Exit criterion: a Skyvalence Workspace test inbox runs for 72 hours without dupl
 
 ### Wave 4 — production deployment
 
-Status: deployed to GCP London and connected to the Workspace Gmail inbox on 2026-08-16; end-to-end mailbox acceptance is waiting for a working hosted-AI credential.
+Status: deployed and production-accepted in GCP London. KAN-5 inbox integration and KAN-6 enquiry detection completed on 2026-08-21.
 
 - Cloud Run web container built from `apps/web`
 - Private Cloud Run worker built from `services/worker`
@@ -259,7 +271,7 @@ Status: deployed to GCP London and connected to the Workspace Gmail inbox on 202
 - Supabase production redirect URLs
 - Health checks, alarms, backups and rollback runbook
 
-Deployment evidence: the web and worker images built in Cloud Build, the web service returned a live login page, anonymous worker access returned 403, and the OIDC Cloud Scheduler invocation completed with zero processing failures. Current web URL: `https://cargo-manager-web-cjbvmtbt4a-nw.a.run.app`.
+Deployment evidence: web revision `cargo-manager-web-00007-dft` and private worker revision `cargo-manager-worker-00008-nsc` serve 100% of traffic. OIDC Scheduler runs completed with HTTP 200 and zero processing failures. Production KAN-6 smoke created one ticket (`CAR-000007`) from one real Groq-classified RFQ and ignored one real Groq-classified automated notice; rerunning created no duplicate. The global production queue is restricted to Gmail inboxes so temporary local acceptance inboxes cannot race the cloud scheduler. Current web URL: `https://cargo-manager-web-cjbvmtbt4a-nw.a.run.app`.
 
 Exit criterion: production smoke test, monitored queues and documented rollback.
 
@@ -345,3 +357,5 @@ Decision log:
 - 2026-08-16: connected `info@skyvalence.com`, quarantined 18 historical messages after the AI provider rejected them for exhausted credits, paused polling, and restricted demo discovery to `[Cargo Demo]` subjects.
 - 2026-08-20: select Groq-hosted `openai/gpt-oss-20b` with strict JSON Schema output for renewed local acceptance; retain Google Gemma as an optional fail-closed adapter. Local acceptance now requires a two-tenant end-to-end harness and explicit retry-terminal evidence.
 - 2026-08-20: `pnpm acceptance:local` passed the complete two-tenant email-to-ticket-to-threaded-reply flow with real GPT-OSS 20B inference; cleanup left no temporary Supabase records or raw objects. Cloud deployment remains a separate, explicitly authorized phase.
+- 2026-08-21: KAN-5 production acceptance observed two unique Gmail inbound messages, one deduplicated ticket/thread, private raw MIME, real Groq extraction and one sent threaded reply; KAN-5 moved to Done.
+- 2026-08-21: KAN-6 added an AI-first quote-enquiry gate with per-inbox policy. Production evidence recorded one `new_quote_enquiry` at 0.99 confidence creating `CAR-000007`, one `non_enquiry` at 1.0 becoming an audited `ignored` event with no ticket, private raw MIME for both and no duplicate after rerun.

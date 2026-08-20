@@ -372,24 +372,171 @@ button {
   gap: 0.65rem;
   margin-top: 1rem;
 }
-.inbox-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  align-items: center;
-  gap: 1rem;
-  padding: 0.9rem;
+.inbox-card {
   border: 1px solid var(--line);
-  border-radius: 0.75rem;
+  border-radius: 0.85rem;
+  overflow: hidden;
+  background: white;
 }
-.inbox-row strong,
-.inbox-row span {
+.inbox-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem 1.1rem;
+}
+.inbox-title,
+.inbox-header-actions,
+.inbox-auto-status,
+.inbox-policy-copy,
+.inbox-history-copy {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+.inbox-title strong,
+.inbox-title span {
   display: block;
 }
-.inbox-row > div > span {
+.inbox-title > div > span {
+  color: var(--muted);
+  font-size: 0.8rem;
+  margin-top: 0.12rem;
+  text-transform: capitalize;
+}
+.inbox-avatar,
+.inbox-detail-icon {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border-radius: 0.65rem;
+  color: var(--brand);
+  background: var(--brand-soft);
+}
+.inbox-avatar {
+  width: 2.5rem;
+  height: 2.5rem;
+}
+.inbox-detail-icon {
+  width: 2.15rem;
+  height: 2.15rem;
+}
+.inbox-auto-status {
+  border-top: 1px solid var(--line);
+  padding: 0.9rem 1.1rem;
+  background: #fbfcfb;
+}
+.inbox-auto-status strong,
+.inbox-policy-copy h3,
+.inbox-history-copy h3 {
+  margin: 0;
+  font-size: 0.9rem;
+}
+.inbox-auto-status p,
+.inbox-policy-copy p,
+.inbox-history-copy p {
+  color: var(--muted);
+  font-size: 0.8rem;
+  margin: 0.16rem 0 0;
+}
+.inbox-baseline {
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 0.76rem;
+  padding: 0.38rem 0.55rem;
+  border-radius: 999px;
+  background: white;
+  border: 1px solid var(--line);
+}
+.inbox-policy-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(22rem, 0.9fr);
+  align-items: center;
+  gap: 1.5rem;
+  border-top: 1px solid var(--line);
+  padding: 1.1rem;
+  background: #f8fbfa;
+}
+.inbox-policy-copy {
+  align-items: flex-start;
+}
+.inbox-policy-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 0.55rem 0.75rem;
+}
+.inbox-policy-form > label:first-child {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 720;
+}
+.inbox-policy-controls {
+  display: grid;
+  grid-template-columns: 4.5rem auto minmax(0, 1fr);
+  align-items: center;
+  gap: 0.4rem;
+}
+.inbox-policy-check {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
   color: var(--muted);
   font-size: 0.78rem;
-  margin-top: 0.15rem;
+}
+.inbox-history-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(21rem, 0.9fr);
+  align-items: center;
+  gap: 1.5rem;
+  border-top: 1px solid var(--line);
+  padding: 1.1rem;
+}
+.inbox-history-copy {
+  align-items: flex-start;
+}
+.inbox-scan-result {
+  display: block;
+  color: var(--brand-dark);
+  font-size: 0.76rem;
+  font-weight: 700;
+  margin-top: 0.45rem;
   text-transform: capitalize;
+}
+.inbox-scan-form {
+  min-width: 0;
+}
+.inbox-scan-form label {
+  display: block;
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 720;
+  margin-bottom: 0.4rem;
+}
+.inbox-scan-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.55rem;
+}
+.inbox-scan-controls .select,
+.inbox-scan-controls .button {
+  min-height: 2.65rem;
+}
+.inbox-scan-controls .button {
+  white-space: nowrap;
+}
+.button-quiet {
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid transparent;
+}
+.button-quiet:hover {
+  color: var(--ink);
+  border-color: var(--line);
+  background: #f7f9f8;
 }
 .connection-state {
   display: inline-flex;
@@ -407,9 +554,28 @@ button {
   background: var(--brand-soft);
 }
 
+@media (max-width: 900px) {
+  .inbox-policy-panel,
+  .inbox-history-panel {
+    grid-template-columns: 1fr;
+  }
+}
 @media (max-width: 760px) {
-  .settings-intro,
-  .inbox-row {
+  .settings-intro {
+    grid-template-columns: 1fr;
+  }
+  .inbox-card-header,
+  .inbox-auto-status {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .inbox-baseline {
+    margin-left: 2.9rem;
+  }
+  .inbox-scan-controls {
+    grid-template-columns: 1fr;
+  }
+  .inbox-policy-form {
     grid-template-columns: 1fr;
   }
 }
