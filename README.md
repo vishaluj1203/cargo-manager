@@ -34,4 +34,6 @@ pnpm worker:once
 
 `mail:smoke` tests real local SMTP, raw MIME parsing and reply threading without touching customer mail. `ai:smoke` sends a synthetic cargo email to the configured hosted open-weight model and validates strict structured output. `e2e:smoke` creates two temporary users/workspaces, proves tenant isolation, tests email-to-ticket-to-threaded-reply, idempotency, audit records, AI provenance and terminal retries, then removes its hosted test data and raw objects. `acceptance:local` runs every static, unit, build and end-to-end gate in order. `worker:once` requires the hosted Supabase server credentials and the configured AI-provider key.
 
+The full local acceptance command last passed on 2026-08-20 with real Groq-hosted GPT-OSS 20B inference and local Mailpit. Supabase remains the owner-approved hosted data plane; passing this gate does not automatically authorize a cloud deployment.
+
 See [the architecture and delivery plan](docs/architecture-plan.md), [the local demo runbook](docs/local-demo-runbook.md), [the GCP deployment runbook](docs/deployment-runbook.md) and [the cargo email location-code research](docs/research/cargo-email-location-codes.md).

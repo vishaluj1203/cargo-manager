@@ -108,6 +108,8 @@ pnpm acceptance:local
 
 Do not declare local acceptance complete unless this command finishes successfully with a real provider/model in the AI and end-to-end output.
 
+Last verified: 2026-08-20. The command passed with `groq` / `openai/gpt-oss-20b`, local Mailpit, two isolated Supabase tenants, idempotent ticket creation, private raw MIME, workflow and audit history, threaded reply delivery, five-attempt failure handling and successful cleanup.
+
 ## Common failures
 
 - `service-role key required`: fill `SUPABASE_SERVICE_ROLE_KEY` with the Supabase server secret key.

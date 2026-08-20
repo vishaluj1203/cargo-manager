@@ -201,4 +201,66 @@ describe("cargo worker runtime", () => {
     expect(summary.inboundFailed).toBe(1);
     expect(repository.failInbound).toHaveBeenCalledWith(event, failure);
   });
+
+  it("marks database persistence failures for retry", async () => {
+    const event: ClaimedInboundEvent = {
+      id: "event-db-failure",
+      organizationId: "org-1",
+      inboxConnectionId: "inbox-1",
+      provider: "local_mailpit",
+      address: "cargo@skyvalence.local",
+      encryptedRefreshToken: null,
+      grantedScopes: [],
+      providerMessageId: "mailpit-db-failure",
+      attempts: 1,
+    };
+    const failure = new Error("database unavailable");
+    const repository = {
+      listConnectedInboxes: vi.fn().mockResolvedValue([]),
+      enqueueInbound: vi.fn(),
+      claimInbound: vi
+        .fn()
+        .mockResolvedValueOnce(event)
+        .mockResolvedValue(null),
+      persistInbound: vi.fn().mockRejectedValue(failure),
+      failInbound: vi.fn(),
+      claimOutbox: vi.fn().mockResolvedValue(null),
+      markOutboxSent: vi.fn(),
+      failOutbox: vi.fn(),
+      close: vi.fn(),
+    } satisfies WorkerRepository;
+    const emailProvider = {
+      listMessages: vi.fn(),
+      fetchAndParse: vi.fn().mockResolvedValue({
+        email: {
+          ...normalizedEmail,
+          providerMessageId: event.providerMessageId,
+        },
+        raw: Buffer.from("raw"),
+        attachmentText: [],
+      }),
+      sendReply: vi.fn(),
+    } satisfies EmailProvider;
+    const extractor = {
+      extract: vi.fn().mockResolvedValue({
+        extraction: fixtureExtraction(),
+        provider: "test-provider",
+        model: "test-model",
+        promptVersion: "v1",
+        schemaVersion: "v1",
+        usage: { inputTokens: 10, outputTokens: 10 },
+      }),
+    } satisfies CargoExtractor;
+    const runtime = new CargoWorkerRuntime(
+      repository,
+      () => emailProvider,
+      extractor,
+      { put: vi.fn().mockResolvedValue("raw.eml") },
+    );
+
+    const summary = await runtime.runOnce();
+    expect(summary.inboundFailed).toBe(1);
+    expect(repository.persistInbound).toHaveBeenCalledOnce();
+    expect(repository.failInbound).toHaveBeenCalledWith(event, failure);
+  });
 });

@@ -345,6 +345,15 @@ North Star Imports`,
       throw new Error(`Audit trail is missing ${expected}`);
     }
   }
+  const { data: workspaceAudit, error: workspaceAuditError } = await userClient
+    .from("audit_events")
+    .select("event_type")
+    .eq("organization_id", organizationId)
+    .eq("event_type", "workspace.created");
+  if (workspaceAuditError) throw workspaceAuditError;
+  if (workspaceAudit?.length !== 1) {
+    throw new Error("Onboarding audit trail is missing workspace.created");
+  }
   if (
     outboxResult.data?.length !== 1 ||
     outboxResult.data[0]?.status !== "sent"
@@ -547,7 +556,7 @@ North Star Imports`,
         rawMimeStored: true,
         rawMimeTenantPrivate: true,
         ticketStatusHistory: statuses,
-        auditTrail: auditTypes,
+        auditTrail: ["workspace.created", ...auditTypes],
         failureHandling: {
           aiInboundRetries: inboundRetryStates,
           aiInboundTerminalStatus: "dead_letter",

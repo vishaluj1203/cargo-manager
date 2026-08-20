@@ -2,7 +2,7 @@
 
 Status: active source of truth
 
-Last updated: 2026-08-16
+Last updated: 2026-08-20
 
 Product owner: Skyvalence
 
@@ -191,7 +191,7 @@ Exit evidence: 16 application tables, RLS on all 16, 20 policies, private raw bu
 
 ### Wave 1 — local product acceptance
 
-Status: historical acceptance passed on 2026-08-16, but current acceptance is open because the Gemini credential is exhausted and the stronger two-tenant harness has not yet passed with Groq.
+Status: complete. The strengthened local acceptance gate passed on 2026-08-20 with real Groq inference, local Mailpit and isolated temporary records in hosted Supabase.
 
 - Signup/sign-in and SSR session refresh
 - Company onboarding and local inbox creation
@@ -203,13 +203,25 @@ Status: historical acceptance passed on 2026-08-16, but current acceptance is op
 - Real Mailpit SMTP/API round trip
 - One complete hosted-DB sample-email acceptance run
 
-Required current evidence: `pnpm acceptance:local` must pass static checks, unit tests, build, Mailpit transport, real hosted AI and the two-tenant full-flow harness. The harness must report real provider/model provenance, idempotency, tenant-private raw MIME, workflow/audit history, threaded delivery and terminal retry behavior.
+Acceptance evidence from `pnpm acceptance:local` on 2026-08-20:
+
+- formatting, type-check, unit tests, lint and production build passed
+- Mailpit SMTP, raw MIME parsing and RFC reply threading passed
+- live `groq` / `openai/gpt-oss-20b` extraction returned nonzero token usage and schema-valid cargo facts
+- two fresh authenticated users created separate workspaces; cross-tenant ticket reads, status mutation and raw-MIME download were denied
+- exactly one inbound message created one ticket; rediscovery created no duplicate event or ticket
+- final harness rerun ticket `CAR-000004` recorded container `TCLU1234567`, Singapore → Rotterdam, priority, action, deadline and confidence
+- workflow history recorded `new` → `in_progress` → `waiting_on_customer`
+- the reply was delivered to Mailpit with the original `Message-ID` in `In-Reply-To` and `References`
+- audit events included `workspace.created`, `email.ingested`, `ticket.status_changed`, `ticket.reply_queued` and `email.sent`
+- synthetic AI failure retried five times and reached `dead_letter`; synthetic SMTP failure became terminal after five attempts
+- cleanup verification found zero temporary organizations, inbound events or raw objects for the acceptance marker
 
 Exit criterion: a new user onboards, a sample email becomes a correctly parsed ticket, an operator replies, and Mailpit shows a correctly threaded customer reply.
 
 ### Wave 2 — CEO/client demo hardening
 
-Status: pending Wave 1 acceptance.
+Status: ready to begin after the product owner accepts the local demo walkthrough.
 
 - Friendly loading, error and empty states
 - Demo seed/reset command scoped to the demo organization
@@ -285,13 +297,15 @@ Cost controls:
 - database indexes on queue and tenant filters
 - service quotas and billing alerts before production
 
-## 12. Current blockers and required owner inputs
+## 12. Current gate and required owner inputs
 
-Mailpit transport passes locally. The current Gemini credential returns `429 RESOURCE_EXHAUSTED`; local acceptance remains incomplete. Remaining acceptance steps:
+The automated local acceptance gate is complete. Supabase remains cloud-hosted by explicit owner decision; the web app, worker and Mailpit run locally for acceptance. No new cloud deployment was performed as part of this gate.
 
-1. Add a Groq key to ignored `.env.local`, select `AI_PROVIDER=groq`, and run `pnpm acceptance:local`.
-2. Complete the manual local browser walkthrough after the automated gate passes.
-3. Make no further cloud deployment changes until both local gates pass.
+Before resuming hosted Gmail processing or changing the deployed services:
+
+1. Complete the product-owner browser walkthrough using synthetic data.
+2. Keep `GROQ_API_KEY` only in ignored local configuration and an approved secret store; never commit or paste it into chat.
+3. Review and explicitly authorize the separate deployment plan; the local gate passing does not itself authorize cloud changes.
 
 The previously shared Gemini API key must be rotated before customer or production use because it appeared in chat history.
 
@@ -308,6 +322,8 @@ The previously shared Gemini API key must be rotated before customer or producti
 - Failed AI, database and SMTP operations visibly retry or dead-letter.
 - Build, type-check, lint, unit tests and full acceptance script pass.
 - Architecture and runbook match the actual implementation.
+
+Automated evidence for these items is recorded in Wave 1 above. The remaining product-owner browser walkthrough is a demo/usability approval, not a missing backend acceptance capability.
 
 ## 14. Evolution discipline
 
@@ -328,3 +344,4 @@ Decision log:
 - 2026-08-16: deployed the public web service and private scheduled worker to GCP London; hosted service, IAM and scheduler smoke checks passed.
 - 2026-08-16: connected `info@skyvalence.com`, quarantined 18 historical messages after the AI provider rejected them for exhausted credits, paused polling, and restricted demo discovery to `[Cargo Demo]` subjects.
 - 2026-08-20: select Groq-hosted `openai/gpt-oss-20b` with strict JSON Schema output for renewed local acceptance; retain Google Gemma as an optional fail-closed adapter. Local acceptance now requires a two-tenant end-to-end harness and explicit retry-terminal evidence.
+- 2026-08-20: `pnpm acceptance:local` passed the complete two-tenant email-to-ticket-to-threaded-reply flow with real GPT-OSS 20B inference; cleanup left no temporary Supabase records or raw objects. Cloud deployment remains a separate, explicitly authorized phase.
