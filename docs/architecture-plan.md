@@ -38,7 +38,7 @@ Use one TypeScript monorepo with independently deployable web and worker process
 | Background work    | Local worker for acceptance; GCP Cloud Run worker for production | Email and AI work must not run inside short-lived web requests                   |
 | Local email        | Mailpit                                                          | Real SMTP/MIME/thread testing without sending external mail                      |
 | Production inbox   | Google Workspace Gmail API                                       | Per-user OAuth, scheduled polling, raw MIME ingestion and threaded mailbox reply |
-| AI extraction      | Gemini API hosted `gemma-4-26b-a4b-it`                           | Open-weight MoE model, forced function output and no local model runtime         |
+| AI extraction      | Groq-hosted `openai/gpt-oss-20b` for local acceptance            | Compact open-weight MoE, strict JSON Schema output and no local model runtime    |
 | Observability      | Structured GCP logs first; Sentry and PostHog next               | Useful deployment logs now, richer error and product analytics after the demo    |
 
 Do not split frontend and backend into separate repositories now. Shared contracts, migrations and one atomic history are more valuable at this stage. The deployment boundary already exists at `apps/web` and `services/worker`.
@@ -51,7 +51,7 @@ services/worker        Inbox discovery, event processing and reply delivery
 packages/contracts     Shared Zod request, email and AI schemas
 packages/db            Drizzle schema and PostgreSQL connection
 packages/email         Mailpit provider, MIME parser and SMTP reply adapter
-packages/ai            Provider-neutral cargo extractor and Google Gemma adapter
+packages/ai            Provider-neutral cargo extractor with Groq and Google adapters
 packages/security      AES-256-GCM server-side credential encryption
 supabase/migrations    Immutable hosted database evolution
 docs                   Architecture and operator runbooks
@@ -76,7 +76,7 @@ Gmail API / local Mailpit
       ▼
 Worker ─────► private raw-email bucket
   │
-  ├────► Gemini API / Gemma forced-function extraction
+  ├────► Hosted open-weight AI with schema-constrained extraction
   │
   └────► Supabase PostgreSQL
              │
@@ -119,7 +119,7 @@ Before onboarding real client data, add retention controls, account deletion/exp
 6. Provider returns raw MIME; `mailparser` normalizes headers, addresses, text, HTML and attachments.
 7. Raw MIME is uploaded to the private bucket using a deterministic path.
 8. AI receives the latest message, bounded prior summary and bounded text attachments. During the company-inbox demo, Gmail discovery is additionally restricted to recent subjects containing `[Cargo Demo]`.
-9. Gemma is forced to call one cargo extraction function; Cargo Manager validates its arguments with Zod and retries one malformed model response.
+9. The provider is forced into schema-constrained output; Cargo Manager validates the result with Zod and retries one malformed model response.
 10. One database transaction creates the email, contact, AI run, thread, ticket link, status history and audit event.
 11. Low-confidence extraction creates a `needs_verification` ticket. Otherwise the ticket starts as `new`.
 12. Duplicate events return the existing ticket and make no duplicate records.
@@ -148,7 +148,7 @@ Context is intentionally bounded:
 - each text attachment: 12,000 characters
 - output: 2,000 tokens
 
-Long conversations must be summarized incrementally; never resend an unlimited mailbox history. The current path calls hosted Gemma. The fake extractor is test-only and returns declared fixtures; it does not pretend to parse an email. The Google free tier is restricted to synthetic demos because its data-use terms are not suitable for real customer cargo email; production requires an approved no-training service tier.
+Long conversations must be summarized incrementally; never resend an unlimited mailbox history. Local acceptance uses Groq-hosted GPT-OSS 20B with strict JSON Schema output; the Google Gemma forced-function adapter remains available. The fake extractor is test-only and returns declared fixtures; production environment selection rejects it. Free service tiers are restricted to synthetic demos; production requires an approved no-training service tier.
 
 ## 8. Reply and threading flow
 
@@ -191,19 +191,19 @@ Exit evidence: 16 application tables, RLS on all 16, 20 policies, private raw bu
 
 ### Wave 1 — local product acceptance
 
-Status: automated isolated acceptance passed on 2026-08-16; manual browser walkthrough remains.
+Status: historical acceptance passed on 2026-08-16, but current acceptance is open because the Gemini credential is exhausted and the stronger two-tenant harness has not yet passed with Groq.
 
 - Signup/sign-in and SSR session refresh
 - Company onboarding and local inbox creation
 - Cargo ticket queue and detail view
 - MIME ingestion and raw storage
-- Gemma forced-function extraction with Zod validation
+- Hosted open-weight structured extraction with Zod validation
 - Ticket creation and customer-reply workflow
 - Durable inbound and outbound retry queues
 - Real Mailpit SMTP/API round trip
 - One complete hosted-DB sample-email acceptance run
 
-Acceptance evidence: `pnpm e2e:smoke` passed authenticated onboarding, SMTP/MIME ingestion, private raw storage, live Gemma extraction, transactional ticket creation, authenticated reply queueing, SMTP delivery and RFC threading, then removed its temporary cloud records.
+Required current evidence: `pnpm acceptance:local` must pass static checks, unit tests, build, Mailpit transport, real hosted AI and the two-tenant full-flow harness. The harness must report real provider/model provenance, idempotency, tenant-private raw MIME, workflow/audit history, threaded delivery and terminal retry behavior.
 
 Exit criterion: a new user onboards, a sample email becomes a correctly parsed ticket, an operator replies, and Mailpit shows a correctly threaded customer reply.
 
@@ -287,13 +287,11 @@ Cost controls:
 
 ## 12. Current blockers and required owner inputs
 
-Local Mailpit plus live-AI acceptance passed before the Gemini credits were depleted, and the London deployment is healthy. Remaining acceptance steps:
+Mailpit transport passes locally. The current Gemini credential returns `429 RESOURCE_EXHAUSTED`; local acceptance remains incomplete. Remaining acceptance steps:
 
-1. Replace the exhausted Gemini credential with an approved hosted-AI credential and run `pnpm ai:smoke`.
-2. Resume `cargo-manager-worker-minute` only after that smoke test succeeds.
-3. Complete one synthetic hosted Gmail email → AI ticket → Gmail reply acceptance run using a subject containing `[Cargo Demo]`.
-4. Add the Cloud Run application URL to Supabase Auth URL configuration if hosted signup confirmation is used.
-5. Configure `app.skyvalence.com` routing and replace the temporary `run.app` callback URL when ready.
+1. Add a Groq key to ignored `.env.local`, select `AI_PROVIDER=groq`, and run `pnpm acceptance:local`.
+2. Complete the manual local browser walkthrough after the automated gate passes.
+3. Make no further cloud deployment changes until both local gates pass.
 
 The previously shared Gemini API key must be rotated before customer or production use because it appeared in chat history.
 
@@ -302,7 +300,7 @@ The previously shared Gemini API key must be rotated before customer or producti
 - A fresh account can create a cargo workspace.
 - Tenant isolation is verified with a second account or automated RLS test.
 - A realistic MIME email is stored privately.
-- Gemma produces schema-valid cargo extraction through a forced function call; no business-field regex parser is used.
+- A real hosted open-weight model produces schema-valid cargo extraction through constrained structured output; no business-field regex parser is used.
 - One ticket is created with references, route, priority, action, deadline and confidence.
 - Reprocessing the same message creates no duplicate ticket or email.
 - Operator workflow changes create history and audit records.
@@ -329,3 +327,4 @@ Decision log:
 - 2026-08-16: use per-user Gmail OAuth with encrypted refresh tokens and scheduled polling for the demo; add push/history synchronization after the first live-inbox acceptance period.
 - 2026-08-16: deployed the public web service and private scheduled worker to GCP London; hosted service, IAM and scheduler smoke checks passed.
 - 2026-08-16: connected `info@skyvalence.com`, quarantined 18 historical messages after the AI provider rejected them for exhausted credits, paused polling, and restricted demo discovery to `[Cargo Demo]` subjects.
+- 2026-08-20: select Groq-hosted `openai/gpt-oss-20b` with strict JSON Schema output for renewed local acceptance; retain Google Gemma as an optional fail-closed adapter. Local acceptance now requires a two-tenant end-to-end harness and explicit retry-terminal evidence.

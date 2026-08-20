@@ -5,6 +5,7 @@ import {
   createCargoExtractorFromEnv,
   FakeCargoExtractor,
   GoogleGemmaCargoExtractor,
+  GroqCargoExtractor,
 } from "./index.js";
 
 const fixture = {
@@ -48,6 +49,24 @@ function gemmaResponse(args: unknown) {
         },
       ],
       usageMetadata: { promptTokenCount: 100, candidatesTokenCount: 80 },
+    }),
+    { status: 200, headers: { "content-type": "application/json" } },
+  );
+}
+
+function groqResponse(content: unknown) {
+  return new Response(
+    JSON.stringify({
+      choices: [
+        {
+          finish_reason: "stop",
+          message: {
+            content:
+              typeof content === "string" ? content : JSON.stringify(content),
+          },
+        },
+      ],
+      usage: { prompt_tokens: 90, completion_tokens: 70 },
     }),
     { status: 200, headers: { "content-type": "application/json" } },
   );
@@ -163,6 +182,111 @@ describe("cargo AI adapter", () => {
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
+  it("forces and validates Groq strict structured output", async () => {
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(groqResponse(fixture));
+    const extractor = new GroqCargoExtractor({
+      apiKey: "groq-test-key",
+      fetcher,
+    });
+
+    const result = await extractor.extract({
+      subject: "Where is our container?",
+      sender: "maya@example.com",
+      receivedAt: new Date("2026-08-16T00:00:00Z"),
+      latestMessage: "Please confirm container status.",
+    });
+
+    expect(result).toMatchObject({
+      extraction: fixture,
+      provider: "groq",
+      model: "openai/gpt-oss-20b",
+      usage: { inputTokens: 90, outputTokens: 70 },
+    });
+    const [url, init] = fetcher.mock.calls[0] ?? [];
+    const request = JSON.parse(String(init?.body));
+    expect(String(url)).toBe("https://api.groq.com/openai/v1/chat/completions");
+    expect(new Headers(init?.headers).get("authorization")).toBe(
+      "Bearer groq-test-key",
+    );
+    expect(request.response_format).toMatchObject({
+      type: "json_schema",
+      json_schema: {
+        name: "record_cargo_email_extraction",
+        strict: true,
+        schema: { additionalProperties: false },
+      },
+    });
+    expect(request.response_format.json_schema.schema.$schema).toBeUndefined();
+    const objectSchemas: Array<Record<string, unknown>> = [];
+    const visitSchema = (value: unknown) => {
+      if (!value || typeof value !== "object") return;
+      if (!Array.isArray(value)) {
+        const objectValue = value as Record<string, unknown>;
+        if (objectValue.type === "object") objectSchemas.push(objectValue);
+        Object.values(objectValue).forEach(visitSchema);
+      } else {
+        value.forEach(visitSchema);
+      }
+    };
+    visitSchema(request.response_format.json_schema.schema);
+    expect(objectSchemas.length).toBeGreaterThan(1);
+    for (const schema of objectSchemas) {
+      expect(schema.additionalProperties).toBe(false);
+      expect(schema.required).toEqual(
+        Object.keys(schema.properties as Record<string, unknown>),
+      );
+    }
+    expect(request.reasoning_effort).toBe("low");
+  });
+
+  it("retries once when Groq returns schema-invalid content", async () => {
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(groqResponse({ ...fixture, confidence: 4 }))
+      .mockResolvedValueOnce(groqResponse(fixture));
+    const extractor = new GroqCargoExtractor({
+      apiKey: "groq-test-key",
+      fetcher,
+    });
+
+    const result = await extractor.extract({
+      subject: "Container status",
+      sender: "maya@example.com",
+      receivedAt: new Date("2026-08-16T00:00:00Z"),
+      latestMessage: "Please confirm container status.",
+    });
+
+    expect(result.extraction).toEqual(fixture);
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    const retry = JSON.parse(String(fetcher.mock.calls[1]?.[1]?.body));
+    expect(retry.messages[1].content).toContain("<validation_correction>");
+  });
+
+  it("fails closed when Groq rejects the request", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify({ error: { message: "invalid API key" } }), {
+        status: 401,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    const extractor = new GroqCargoExtractor({
+      apiKey: "invalid-test-key",
+      fetcher,
+    });
+
+    await expect(
+      extractor.extract({
+        subject: "Booking request",
+        sender: "customer@example.com",
+        receivedAt: new Date("2026-08-16T00:00:00Z"),
+        latestMessage: "Please book one pallet from Chennai to Dubai.",
+      }),
+    ).rejects.toThrow("Groq API request failed (401)");
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
   it("never selects the fake extractor from environment configuration", () => {
     expect(() =>
       createCargoExtractorFromEnv({
@@ -177,5 +301,12 @@ describe("cargo AI adapter", () => {
         AI_API_KEY: "configured-key",
       }),
     ).toBeInstanceOf(GoogleGemmaCargoExtractor);
+
+    expect(
+      createCargoExtractorFromEnv({
+        AI_PROVIDER: "groq",
+        GROQ_API_KEY: "configured-key",
+      }),
+    ).toBeInstanceOf(GroqCargoExtractor);
   });
 });

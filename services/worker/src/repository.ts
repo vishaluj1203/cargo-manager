@@ -31,7 +31,10 @@ function retryDelaySeconds(attempts: number): number {
 }
 
 export class PostgresWorkerRepository implements WorkerRepository {
+  constructor(private readonly organizationId: string | null = null) {}
+
   async listConnectedInboxes(): Promise<ConnectedInbox[]> {
+    const organizationId = this.organizationId;
     return sqlClient<ConnectedInbox[]>`
       select id,
              organization_id as "organizationId",
@@ -44,6 +47,7 @@ export class PostgresWorkerRepository implements WorkerRepository {
         on credentials.inbox_connection_id = inbox.id
       where inbox.status = 'connected'
         and inbox.provider in ('local_mailpit', 'gmail')
+        and (${organizationId}::uuid is null or inbox.organization_id = ${organizationId}::uuid)
       order by inbox.created_at
     `;
   }
@@ -67,11 +71,13 @@ export class PostgresWorkerRepository implements WorkerRepository {
   }
 
   async claimInbound(workerId: string): Promise<ClaimedInboundEvent | null> {
+    const organizationId = this.organizationId;
     const rows = await sqlClient<ClaimedInboundEvent[]>`
       with candidate as (
         select inbound_events.id
         from public.inbound_events
         where attempts < 5
+          and (${organizationId}::uuid is null or organization_id = ${organizationId}::uuid)
           and available_at <= now()
           and (
             status in ('pending', 'failed')
@@ -323,10 +329,12 @@ export class PostgresWorkerRepository implements WorkerRepository {
   }
 
   async claimOutbox(workerId: string): Promise<ClaimedOutboxDelivery | null> {
+    const organizationId = this.organizationId;
     const claimed = await sqlClient<{ id: string }[]>`
       with candidate as (
         select id from public.outbox_jobs
         where attempts < 5 and available_at <= now()
+          and (${organizationId}::uuid is null or organization_id = ${organizationId}::uuid)
           and (
             status in ('pending', 'failed')
             or (status = 'processing' and locked_at < now() - interval '10 minutes')

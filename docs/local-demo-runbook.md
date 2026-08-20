@@ -9,7 +9,7 @@ Put values in ignored `.env.local`:
 - Supabase URL and publishable key
 - Supabase PostgreSQL transaction and direct URLs
 - Supabase secret/service-role key
-- Google AI Studio API key
+- Groq API key for the local acceptance model
 - local application and Mailpit defaults from `.env.example`
 
 Never commit `.env.local`.
@@ -40,7 +40,7 @@ Terminal two:
 pnpm dev:worker
 ```
 
-Open `http://localhost:3000`, create an account and complete workspace onboarding.
+Open `http://localhost:3000`, create an account and complete workspace onboarding. The application, worker and email transport run locally; the current acceptance data plane remains the configured hosted Supabase project.
 
 ## Send a realistic customer email
 
@@ -88,7 +88,7 @@ This creates a uniquely addressed sample email and verifies MIME parsing plus a 
 pnpm ai:smoke
 ```
 
-This submits a synthetic customs-hold email to Google-hosted Gemma, requires the model to call the cargo extraction function and validates the returned arguments with the shared Zod contract. Google free-tier requests must contain synthetic data only.
+This submits a synthetic customs-hold email to the configured hosted model. The local acceptance default is Groq-hosted `openai/gpt-oss-20b` in strict JSON Schema mode; the response is validated again with the shared Zod contract. Free-tier requests must contain synthetic data only.
 
 ## Complete isolated acceptance test
 
@@ -96,12 +96,22 @@ This submits a synthetic customs-hold email to Google-hosted Gemma, requires the
 pnpm e2e:smoke
 ```
 
-This command uses the real onboarding and reply RPCs. It creates a temporary confirmed Supabase user and freight-forwarder workspace with a unique Mailpit inbox, sends one synthetic customer email, runs the worker and Gemma, verifies the stored ticket and raw MIME, queues a reply as the authenticated operator, and verifies the outbound RFC thread. Its `finally` cleanup removes the temporary organization, user and raw object even when a test assertion fails.
+This command uses the same onboarding, workflow and reply RPCs as the web application. It creates two temporary confirmed users and workspaces, proves cross-tenant ticket mutation and raw-MIME access are denied, sends one synthetic customer email, runs the real hosted AI, verifies AI provenance and ticket fields, proves duplicate discovery is idempotent, changes workflow state, queues a reply and verifies the outbound RFC thread and audit trail. It also proves AI failures retry five times into `dead_letter` and SMTP failures become terminal after five attempts. Its `finally` cleanup removes both temporary organizations, users and raw objects even when an assertion fails.
+
+## One-command acceptance gate
+
+With Mailpit running and `.env.local` configured:
+
+```bash
+pnpm acceptance:local
+```
+
+Do not declare local acceptance complete unless this command finishes successfully with a real provider/model in the AI and end-to-end output.
 
 ## Common failures
 
 - `service-role key required`: fill `SUPABASE_SERVICE_ROLE_KEY` with the Supabase server secret key.
-- `AI_API_KEY is required`: create a Google AI Studio key and fill `AI_API_KEY`.
+- `GROQ_API_KEY is required`: create a Groq project key and fill `GROQ_API_KEY`; never paste it into source control or chat.
 - Mailpit connection refused: run `brew services info mailpit`, then restart the service.
 - Database connection error: copy both URLs from Supabase **Connect**, keeping the password URL-encoded.
 - Ticket not visible: verify onboarding succeeded and RLS membership exists.

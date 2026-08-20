@@ -14,6 +14,7 @@
     "mail:smoke": "pnpm --filter @cargo/email smoke",
     "ai:smoke": "pnpm --filter @cargo/ai smoke",
     "e2e:smoke": "pnpm --filter @cargo/worker smoke:e2e",
+    "acceptance:local": "pnpm format:check && pnpm typecheck && pnpm test && pnpm lint && pnpm build && pnpm mail:smoke && pnpm ai:smoke && pnpm e2e:smoke",
     "build": "turbo build",
     "typecheck": "turbo typecheck",
     "test": "turbo test",
